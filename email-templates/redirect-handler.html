@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Verified - MeowMap</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #f8f1e4 0%, #dec4a9 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 4px 20px rgba(111, 109, 107, 0.15);
+    }
+    
+    .icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+    
+    h1 {
+      color: #d0854f;
+      font-size: 28px;
+      margin-bottom: 16px;
+      font-weight: 700;
+    }
+    
+    p {
+      color: #6f6d6b;
+      font-size: 16px;
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    
+    .success-message {
+      background: #f8f1e4;
+      border-left: 4px solid #34C759;
+      padding: 16px;
+      border-radius: 8px;
+      margin: 24px 0;
+      text-align: left;
+    }
+    
+    .success-message p {
+      margin: 0;
+      color: #6f6d6b;
+      font-size: 14px;
+    }
+    
+    .button {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 16px 32px;
+      background-color: #d0854f;
+      color: white;
+      text-decoration: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(208, 133, 79, 0.3);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(208, 133, 79, 0.4);
+    }
+    
+    .button:active {
+      transform: translateY(0);
+    }
+    
+    .footer {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #dec4a9;
+    }
+    
+    .footer p {
+      font-size: 12px;
+      color: #dec4a9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">✅</div>
+    <h1>Email Verified! 🐱</h1>
+    <p>Your email address has been successfully verified.</p>
+    
+    <div class="success-message">
+      <p><strong>Next Steps:</strong></p>
+      <p>1. Open the MeowMap app on your device</p>
+      <p>2. Sign in with your email and password</p>
+      <p>3. You're all set to start using MeowMap!</p>
+    </div>
+    
+    <p style="font-size: 14px; color: #dec4a9;">
+      You can close this page now. Your account is ready to use!
+    </p>
+    
+    <div class="footer">
+      <p>MeowMap - Your feline adventure companion</p>
+    </div>
+  </div>
+
+  <script>
+    // Extract tokens from URL hash for potential future use
+    // (Currently we just show success message, but tokens are available if needed)
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+    
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+    const type = params.get('type');
+    
+    // Log for debugging (remove in production)
+    if (accessToken && refreshToken) {
+      console.log('Email verification successful!');
+      console.log('Type:', type);
+      // Tokens are available here if you want to store them
+      // But for security, we let the app handle authentication via sign-in
+    }
+    
+    // Optional: Try to open the app via deep link
+    // Uncomment if you want to attempt to open the app automatically
+    /*
+    setTimeout(() => {
+      const appScheme = 'meowmap://auth/callback';
+      window.location.href = appScheme;
+    }, 2000);
+    */
+  </script>
+</body>
+</html>
+
