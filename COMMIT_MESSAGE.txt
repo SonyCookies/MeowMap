@@ -1,0 +1,42 @@
+refactor(auth): extract components, hooks, and utilities from AuthScreen
+
+This commit refactors the authentication system by extracting reusable
+components, custom hooks, and utility functions from AuthScreen.js to
+improve code organization, maintainability, and reusability.
+
+## Extracted Components (components/auth/)
+- EmailInput: Reusable email input with validation
+- PasswordInput: Password input with show/hide toggle
+- PasswordStrengthIndicator: Password strength checker with requirements
+- RememberMeCheckbox: Remember me checkbox component
+- ErrorModal: Reusable error modal component
+- SuccessModal: Success message modal component
+- TermsModal: Terms and conditions modal
+- PrivacyModal: Privacy policy modal
+
+## Custom Hooks (hooks/)
+- useBiometricAuth: Handles biometric authentication logic and state
+- useLoginAttempts: Manages login attempt tracking and rate limiting
+
+## Utility Functions (utils/)
+- emailValidation: Email format validation
+- passwordStrength: Password strength checking and requirements
+- cooldown: Cooldown time formatting utility
+
+## Documentation
+- Added PROJECT_STRUCTURE.md to document folder structure and workflow
+- Updated AUTHENTICATION_IMPROVEMENTS.md with implementation status
+
+## Changes
+- Refactored AuthScreen.js (reduced from ~2259 to ~1843 lines)
+- Updated AuthContext.js imports
+- Cleaned up unused email template files
+- All functionality preserved, code now more modular and testable
+
+## Benefits
+- Better separation of concerns
+- Improved code reusability
+- Easier testing and maintenance
+- Clearer project structure
+- Reduced cognitive complexity in AuthScreen
+

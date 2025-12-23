@@ -44,12 +44,13 @@ export const AuthProvider = ({ children }) => {
 
   // Sign up with email and password
   const signUp = async (email, password) => {
-    // For mobile apps, we don't set emailRedirectTo
-    // Users will verify their email via the link, then sign in manually
-    // The email verification will complete in the browser
+    // Redirect to web app's email verification success page
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: 'https://meowmap-web.vercel.app/auth/verify-email',
+      },
     });
     return { data, error };
   };
@@ -67,6 +68,14 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     return { error };
+  };
+
+  // Forgot password - send password reset email
+  const forgotPassword = async (email) => {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://meowmap-web.vercel.app/auth/reset-password',
+    });
+    return { data, error };
   };
 
   // Sign in with OAuth provider
@@ -145,6 +154,7 @@ export const AuthProvider = ({ children }) => {
     signIn,
     signOut,
     signInWithOAuth,
+    forgotPassword,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
