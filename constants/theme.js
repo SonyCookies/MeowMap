@@ -46,6 +46,7 @@ export const colors = {
   // Status Colors
   error: '#FF3B30',
   success: '#34C759',
+  warning: '#FF9500',
   warning: '#f2cd89',
   info: '#d0854f',
   
@@ -75,6 +76,8 @@ export const theme = {
     md: 8,
     lg: 12,
     xl: 16,
+    xxl: 24,
+    xxxl: 32,
     round: 999,
   },
   typography: {

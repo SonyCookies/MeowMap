@@ -203,7 +203,10 @@ export default function AuthScreen() {
   const handlePasswordChange = (text) => {
     setPassword(text);
     if (isSignUp) {
-      checkPasswordStrength(text);
+      const strength = checkPasswordStrength(text);
+      setPasswordStrength(strength);
+    } else {
+      setPasswordStrength(null);
     }
   };
 
@@ -798,11 +801,14 @@ export default function AuthScreen() {
                   setIsSignUp(!isSignUp);
                   setEmailError(''); // Clear email error when switching modes
                   if (isSignUp) {
+                    // Check password strength when switching to sign up
+                    if (password) {
+                      const strength = checkPasswordStrength(password);
+                      setPasswordStrength(strength);
+                    }
+                  } else {
                     // Clear password strength when switching to sign in
                     setPasswordStrength(null);
-                  } else {
-                    // Check password strength when switching to sign up
-                    checkPasswordStrength(password);
                   }
                 }} 
                 disabled={loading}
@@ -1131,7 +1137,7 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#ffffff',
   },
   scrollContent: {
     flexGrow: 1,

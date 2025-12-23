@@ -1,42 +1,76 @@
-refactor(auth): extract components, hooks, and utilities from AuthScreen
+feat: add profile screen, menu drawer, and database-backed notification system
 
-This commit refactors the authentication system by extracting reusable
-components, custom hooks, and utility functions from AuthScreen.js to
-improve code organization, maintainability, and reusability.
+This commit implements a comprehensive user profile management system, navigation drawer, and persistent notification system using Supabase database storage.
 
-## Extracted Components (components/auth/)
-- EmailInput: Reusable email input with validation
-- PasswordInput: Password input with show/hide toggle
-- PasswordStrengthIndicator: Password strength checker with requirements
-- RememberMeCheckbox: Remember me checkbox component
-- ErrorModal: Reusable error modal component
-- SuccessModal: Success message modal component
-- TermsModal: Terms and conditions modal
-- PrivacyModal: Privacy policy modal
+## New Features
 
-## Custom Hooks (hooks/)
-- useBiometricAuth: Handles biometric authentication logic and state
-- useLoginAttempts: Manages login attempt tracking and rate limiting
+### Profile Management
+- Added ProfileScreen.js for viewing and editing user profiles
+- Profile editing with validation (display name, bio, location, phone number)
+- Avatar upload and preview functionality
+- Real-time form validation with error messages
+- Profile updates trigger notifications
 
-## Utility Functions (utils/)
-- emailValidation: Email format validation
-- passwordStrength: Password strength checking and requirements
-- cooldown: Cooldown time formatting utility
+### Navigation Drawer
+- Created MenuDrawer component with slide-in animation from right
+- Menu items: Profile, My Sightings, Map View, Community, Statistics, Settings, Help, About, Sign Out
+- Consistent animation style with NotificationDrawer
+- Clean, organized menu item design
 
-## Documentation
-- Added PROJECT_STRUCTURE.md to document folder structure and workflow
-- Updated AUTHENTICATION_IMPROVEMENTS.md with implementation status
+### Notification System (Database-Backed)
+- Migrated from AsyncStorage to Supabase database storage
+- Created notifications table schema with RLS policies
+- Created notificationService.js for database operations
+- Notifications persist across app reinstalls and sync across devices
+- User-specific notifications with proper security policies
 
-## Changes
-- Refactored AuthScreen.js (reduced from ~2259 to ~1843 lines)
-- Updated AuthContext.js imports
-- Cleaned up unused email template files
-- All functionality preserved, code now more modular and testable
+## New Files
+
+### Components
+- components/home/MenuDrawer.js - Navigation drawer component
+
+### Screens
+- screens/ProfileScreen.js - User profile viewing and editing screen
+
+### Services
+- services/notificationService.js - Notification database operations
+
+### Database
+- database/notifications-schema.sql - Database schema for notifications table
+- database/SETUP_NOTIFICATIONS.md - Setup instructions
+
+### Utilities
+- utils/notifications.js - Notification helper functions
+
+## Updated Files
+
+### Contexts
+- contexts/NotificationContext.js - Migrated to Supabase database storage
+
+### Screens
+- screens/HomeScreen.js - Integrated ProfileScreen navigation, removed debug code
+- screens/ProfileScreen.js - Added notification creation on profile update
+
+### Components
+- components/home/NotificationDrawer.js - Added profile notification type support
+
+### App Structure
+- App.js - Wrapped app with NotificationProvider
+
+## Technical Details
+
+- Notifications are stored per user in Supabase with proper RLS policies
+- Profile updates automatically create "Profile Updated" notifications
+- Notification badge shows unread count dynamically
+- All notification operations (create, read, delete) sync with database
+- Menu drawer and notification drawer share consistent animation patterns
+- Profile screen includes form validation, avatar upload, and error handling
 
 ## Benefits
-- Better separation of concerns
-- Improved code reusability
-- Easier testing and maintenance
-- Clearer project structure
-- Reduced cognitive complexity in AuthScreen
+
+- Persistent notification storage across devices
+- Better user experience with profile management
+- Improved navigation with dedicated menu drawer
+- Secure, scalable notification system
+- Clean code organization following PROJECT_STRUCTURE.md guidelines
 

@@ -3,12 +3,16 @@ import { StyleSheet, View, ActivityIndicator } from 'react-native';
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import AuthScreen from './screens/AuthScreen';
 import HomeScreen from './screens/HomeScreen';
+import ProfileSetupScreen from './screens/ProfileSetupScreen';
 import { supabase } from './lib/supabase';
+import { useProfileCheck } from './hooks/useProfileCheck';
 
 function AppContent() {
   const { user, loading } = useAuth();
+  const { profile, isComplete, loading: profileLoading, refetch } = useProfileCheck(user?.id);
 
   // Handle deep links for email confirmation
   useEffect(() => {
@@ -75,7 +79,13 @@ function AppContent() {
     }
   };
 
-  if (loading) {
+  // Handle profile completion callback
+  const handleProfileComplete = async () => {
+    // Refetch profile to update state
+    await refetch();
+  };
+
+  if (loading || (user && profileLoading)) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -85,7 +95,15 @@ function AppContent() {
 
   return (
     <>
-      {user ? <HomeScreen /> : <AuthScreen />}
+      {user ? (
+        isComplete ? (
+          <HomeScreen />
+        ) : (
+          <ProfileSetupScreen onComplete={handleProfileComplete} />
+        )
+      ) : (
+        <AuthScreen />
+      )}
       <StatusBar style="auto" />
     </>
   );
@@ -94,7 +112,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <NotificationProvider>
+        <AppContent />
+      </NotificationProvider>
     </AuthProvider>
   );
 }
