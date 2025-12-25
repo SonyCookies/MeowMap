@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 16.28.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN": "pk.eyJ1Ijoic29ubnlzYXJjaWEiLCJhIjoiY21qamdsNGoxMjA0eDNncHUwOHlidjNkeiJ9.lqgUvtO9IsfO_bR-u8lR4A",
+        "RNMapboxMapsDownloadToken": "YOUR_SECRET_DOWNLOAD_TOKEN_HERE"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN": "pk.eyJ1Ijoic29ubnlzYXJjaWEiLCJhIjoiY21qamdsNGoxMjA0eDNncHUwOHlidjNkeiJ9.lqgUvtO9IsfO_bR-u8lR4A",
+        "RNMapboxMapsDownloadToken": "YOUR_SECRET_DOWNLOAD_TOKEN_HERE"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN": "pk.eyJ1Ijoic29ubnlzYXJjaWEiLCJhIjoiY21qamdsNGoxMjA0eDNncHUwOHlidjNkeiJ9.lqgUvtO9IsfO_bR-u8lR4A",
+        "RNMapboxMapsDownloadToken": "sk.eyJ1Ijoic29ubnlzYXJjaWEiLCJhIjoiY21qam4zcmp2MDB1dDNrc2RrZ3RzNGZmZiJ9.jOkWhS55K8XqFpUjc3kHEA"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

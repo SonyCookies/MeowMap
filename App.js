@@ -104,7 +104,7 @@ function AppContent() {
       ) : (
         <AuthScreen />
       )}
-      <StatusBar style="auto" />
+      <StatusBar style="dark" />
     </>
   );
 }

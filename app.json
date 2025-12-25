@@ -14,13 +14,22 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.meowmap.app"
+      "bundleIdentifier": "com.meowmap.app",
+      "userInterfaceStyle": "light",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "We use your location to show your position on the map and nearby cat sightings.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We use your location to show your position on the map and nearby cat sightings."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
       "edgeToEdgeEnabled": true,
       "intentFilters": [
         {
@@ -31,13 +40,30 @@
               "scheme": "meowmap"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
-      ]
+      ],
+      "package": "com.meowmap.app"
     },
     "scheme": "meowmap",
+    "plugins": [
+      [
+        "@rnmapbox/maps",
+        {
+          "RNMapboxMapsDownloadToken": "sk.eyJ1Ijoic29ubnlzYXJjaWEiLCJhIjoiY21qam4zcmp2MDB1dDNrc2RrZ3RzNGZmZiJ9.jOkWhS55K8XqFpUjc3kHEA"
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d1dba4e4-e7f1-48b6-9742-bcdf9572e34c"
+      }
     }
   }
 }

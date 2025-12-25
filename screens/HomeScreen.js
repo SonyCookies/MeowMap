@@ -23,6 +23,9 @@ import { getProfile } from '../services/profileService';
 import NotificationDrawer from '../components/home/NotificationDrawer';
 import MenuDrawer from '../components/home/MenuDrawer';
 import ProfileScreen from './ProfileScreen';
+import UpdateDetailScreen from './UpdateDetailScreen';
+import MapViewScreen from './MapViewScreen';
+import UpdatesListScreen from './UpdatesListScreen';
 
 // 5. Constants and contexts
 import { colors, theme } from '../constants/theme';
@@ -38,16 +41,98 @@ export default function HomeScreen() {
   const [notificationDrawerVisible, setNotificationDrawerVisible] = useState(false);
   const [menuDrawerVisible, setMenuDrawerVisible] = useState(false);
   const [showProfileScreen, setShowProfileScreen] = useState(false);
+  const [showMapViewScreen, setShowMapViewScreen] = useState(false);
+  const [showUpdatesListScreen, setShowUpdatesListScreen] = useState(false);
+  const [selectedUpdate, setSelectedUpdate] = useState(null);
+  const [updateDetailSource, setUpdateDetailSource] = useState(null); // 'home' or 'list'
+  const updatesScrollViewRef = React.useRef(null);
+  const autoScrollPausedRef = React.useRef(false);
+  const scrollX = React.useRef(0);
+  const screenWidth = Dimensions.get('window').width;
 
   const updates = [
     { id: '1', title: 'New cat spotted near the park', subtitle: 'Check the latest sighting and add notes.' },
     { id: '2', title: 'Community meetup this weekend', subtitle: 'Join fellow Cat Guardians for a neighborhood walk.' },
     { id: '3', title: 'Top contributors this week', subtitle: 'See who logged the most sightings in your area.' },
+    { id: '4', title: 'New feature: Cat photo gallery', subtitle: 'Upload and share photos of your cat sightings with the community.' },
+    { id: '5', title: 'Weekly challenge starts Monday', subtitle: 'Join the "Cat Spotter Challenge" and win exclusive badges!' },
+    { id: '6', title: 'Community guidelines updated', subtitle: 'Please review our updated community guidelines for responsible cat tracking.' },
+    { id: '7', title: 'Lost cat alert: Orange tabby', subtitle: 'Help reunite a lost orange tabby cat with its family in the downtown area.' },
+    { id: '8', title: 'Map improvements released', subtitle: 'Enhanced map view with better location tracking and new filter options.' },
   ];
+
+  // Only show 5 recent updates in the carousel
+  const recentUpdates = updates.slice(0, 5);
+
+  // Create a looped array for infinite scrolling (duplicate items at start and end)
+  const loopedUpdates = [...recentUpdates, ...recentUpdates, ...recentUpdates];
 
   useEffect(() => {
     loadProfile();
   }, [user]);
+
+  // Initialize scroll position to middle section for infinite loop
+  useEffect(() => {
+    if (recentUpdates.length === 0 || !updatesScrollViewRef.current) return;
+    
+    const cardWidth = 280;
+    const gap = 12;
+    const itemWidth = cardWidth + gap;
+    const sectionWidth = itemWidth * recentUpdates.length;
+    // With paddingHorizontal, section 1 starts at: paddingLeft + sectionWidth
+    // To center card at index 0 in section 1: scrollX = paddingLeft + sectionWidth + (0 * itemWidth) - paddingLeft = sectionWidth
+    const initialScrollX = sectionWidth;
+    
+    // Small delay to ensure ScrollView is ready
+    setTimeout(() => {
+      if (updatesScrollViewRef.current) {
+        updatesScrollViewRef.current.scrollTo({
+          x: initialScrollX,
+          animated: false,
+        });
+        scrollX.current = initialScrollX;
+        setUpdatesIndex(0);
+      }
+    }, 100);
+  }, [recentUpdates.length, screenWidth]);
+
+  // Auto-slide updates every 5 seconds (pauses when user manually scrolling)
+  useEffect(() => {
+    if (recentUpdates.length === 0) return;
+
+    const interval = setInterval(() => {
+      // Skip auto-scroll if paused (user is manually scrolling)
+      if (autoScrollPausedRef.current) {
+        return;
+      }
+
+      setUpdatesIndex((prevIndex) => {
+        const nextIndex = (prevIndex + 1) % recentUpdates.length;
+        // Scroll to the next update, centered
+        if (updatesScrollViewRef.current) {
+          const cardWidth = 280;
+          const gap = 12;
+          const itemWidth = cardWidth + gap;
+          const sectionWidth = itemWidth * recentUpdates.length;
+          // With paddingHorizontal, to center a card:
+          // Card position in content = paddingLeft + (sectionIndex * sectionWidth) + (cardIndex * itemWidth)
+          // To center: scrollX = cardPosition - paddingLeft = (sectionIndex * sectionWidth) + (cardIndex * itemWidth)
+          // Stay in middle section (section 1) for infinite loop
+          const targetSection = 1;
+          const scrollToX = targetSection * sectionWidth + (nextIndex * itemWidth);
+          
+          updatesScrollViewRef.current.scrollTo({
+            x: scrollToX,
+            animated: true,
+          });
+          scrollX.current = scrollToX;
+        }
+        return nextIndex;
+      });
+    }, 5000); // 5 seconds
+
+    return () => clearInterval(interval);
+  }, [recentUpdates.length, screenWidth]);
 
   const loadProfile = async () => {
     if (!user?.id) {
@@ -83,9 +168,129 @@ export default function HomeScreen() {
     const { contentOffset } = event.nativeEvent;
     const cardWidth = 280;
     const gap = 12;
-    const index = Math.round(contentOffset.x / (cardWidth + gap));
+    const itemWidth = cardWidth + gap;
+    const scrollPosition = contentOffset.x;
+    const sectionWidth = itemWidth * recentUpdates.length;
+    
+    // Update scroll position ref
+    scrollX.current = scrollPosition;
+    
+    // Calculate which section we're in (0, 1, or 2)
+    const section = Math.floor(scrollPosition / sectionWidth);
+    // Calculate position within the current section
+    const positionInSection = scrollPosition % sectionWidth;
+    // Find which card is closest to center
+    const index = Math.round(positionInSection / itemWidth) % recentUpdates.length;
+    
     setUpdatesIndex(index);
+    
+    // Loop detection: seamlessly jump between sections for infinite scroll
+    if (section === 0 && positionInSection < itemWidth) {
+      // Near the start of first section, jump to same position in middle section
+      if (updatesScrollViewRef.current) {
+        const newScrollX = sectionWidth + positionInSection;
+        updatesScrollViewRef.current.scrollTo({
+          x: newScrollX,
+          animated: false,
+        });
+        scrollX.current = newScrollX;
+      }
+    } else if (section === 2 && positionInSection > sectionWidth - itemWidth) {
+      // Near the end of last section, jump to same position in middle section
+      if (updatesScrollViewRef.current) {
+        const newScrollX = sectionWidth + positionInSection;
+        updatesScrollViewRef.current.scrollTo({
+          x: newScrollX,
+          animated: false,
+        });
+        scrollX.current = newScrollX;
+      }
+    }
   };
+
+  const handleScrollBeginDrag = () => {
+    // Pause auto-scroll when user starts manually scrolling
+    autoScrollPausedRef.current = true;
+  };
+
+  const handleScrollEndDrag = () => {
+    // Snap to nearest centered card
+    if (updatesScrollViewRef.current) {
+      const cardWidth = 280;
+      const gap = 12;
+      const itemWidth = cardWidth + gap;
+      const sectionWidth = itemWidth * recentUpdates.length;
+      
+      const currentSection = Math.floor(scrollX.current / sectionWidth);
+      const positionInSection = scrollX.current % sectionWidth;
+      const nearestIndex = Math.round(positionInSection / itemWidth) % recentUpdates.length;
+      
+      // Calculate centered position for the nearest card (stay in current section, or jump to middle if at edges)
+      let targetSection = currentSection;
+      if (currentSection === 0 || currentSection === 2) {
+        targetSection = 1; // Jump to middle section
+      }
+      const snapToX = targetSection * sectionWidth + (nearestIndex * itemWidth);
+      
+      updatesScrollViewRef.current.scrollTo({
+        x: snapToX,
+        animated: true,
+      });
+      scrollX.current = snapToX;
+      setUpdatesIndex(nearestIndex);
+    }
+    
+    // Resume auto-scroll after 5 seconds when user stops scrolling
+    setTimeout(() => {
+      autoScrollPausedRef.current = false;
+    }, 5000);
+  };
+
+  const handleUpdatePress = (update, source = 'home') => {
+    setSelectedUpdate(update);
+    setUpdateDetailSource(source);
+    // Close updates list screen when an update is selected from list
+    if (source === 'list') {
+      setShowUpdatesListScreen(false);
+    }
+  };
+
+  const handleUpdateDetailBack = () => {
+    setSelectedUpdate(null);
+    // If opened from list, go back to list
+    if (updateDetailSource === 'list') {
+      setShowUpdatesListScreen(true);
+    }
+    setUpdateDetailSource(null);
+  };
+
+  // If showing update detail screen, render it instead
+  if (selectedUpdate) {
+    return (
+      <UpdateDetailScreen 
+        update={selectedUpdate} 
+        onBack={handleUpdateDetailBack} 
+      />
+    );
+  }
+
+  // If showing updates list screen, render it instead
+  if (showUpdatesListScreen) {
+    return (
+      <UpdatesListScreen 
+        updates={updates}
+        onBack={() => setShowUpdatesListScreen(false)}
+        onUpdatePress={(update) => handleUpdatePress(update, 'list')}
+      />
+    );
+  }
+
+  // If showing map view screen, render it instead
+  if (showMapViewScreen) {
+    return (
+      <MapViewScreen onBack={() => setShowMapViewScreen(false)} />
+    );
+  }
 
   // If showing profile screen, render it instead
   if (showProfileScreen) {
@@ -112,30 +317,19 @@ export default function HomeScreen() {
         <View style={styles.header}>
 
           <View style={styles.profileSection}>
-            {loading ? (
-              <>
-                <View style={styles.profileImagePlaceholder}>
-                  <FontAwesome name="user" size={24} color={colors.primary} />
-                </View>
-                <Text style={styles.profileName}>Loading...</Text>
-              </>
+            {profile?.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={styles.profileImage}
+              />
             ) : (
-              <>
-                {profile?.avatar_url ? (
-                  <Image
-                    source={{ uri: profile.avatar_url }}
-                    style={styles.profileImage}
-                  />
-                ) : (
-                  <View style={styles.profileImagePlaceholder}>
-                    <FontAwesome name="user" size={24} color={colors.primary} />
-                  </View>
-                )}
-                <Text style={styles.profileName}>
-                  {profile?.display_name || 'Cat Guardian'}
-                </Text>
-              </>
+              <View style={styles.profileImagePlaceholder}>
+                <FontAwesome name="user" size={24} color={colors.primary} />
+              </View>
             )}
+            <Text style={styles.profileName}>
+              {profile?.display_name || 'Cat Guardian'}
+            </Text>
           </View>
 
           <View style={styles.headerIcons}>
@@ -167,28 +361,43 @@ export default function HomeScreen() {
 
         {/* Updates Slider */}
         <View style={styles.updatesContainer}>
-          <Text style={styles.sectionTitle}>Updates</Text>
+          <View style={styles.updatesHeader}>
+            <Text style={styles.sectionTitle}>Recent Updates</Text>
+            <TouchableOpacity 
+              onPress={() => setShowUpdatesListScreen(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.viewAllButton}>View All</Text>
+            </TouchableOpacity>
+          </View>
           <ScrollView
+            ref={updatesScrollViewRef}
             horizontal
             showsHorizontalScrollIndicator={false}
-            snapToInterval={292}
             decelerationRate="fast"
             contentContainerStyle={styles.updatesScrollContent}
             onScroll={handleUpdateScroll}
+            onScrollBeginDrag={handleScrollBeginDrag}
+            onScrollEndDrag={handleScrollEndDrag}
             scrollEventThrottle={16}
           >
-            {updates.map((item) => (
-              <View key={item.id} style={styles.updateCard}>
+            {loopedUpdates.map((item, index) => (
+              <TouchableOpacity 
+                key={`${item.id}-${index}`} 
+                style={styles.updateCard}
+                onPress={() => handleUpdatePress(item, 'home')}
+                activeOpacity={0.8}
+              >
                 <View style={styles.updateImagePlaceholder}>
                   <MaterialCommunityIcons name="image" size={24} color={colors.primary} />
                 </View>
                 <Text style={styles.updateTitle}>{item.title}</Text>
                 <Text style={styles.updateSubtitle}>{item.subtitle}</Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </ScrollView>
           <View style={styles.dotsRow}>
-            {updates.map((item, index) => (
+            {recentUpdates.map((item, index) => (
               <View
                 key={item.id}
                 style={[
@@ -204,7 +413,7 @@ export default function HomeScreen() {
         <View style={styles.statsBannerContainer}>
           {/* Background Image - Flipped Horizontally */}
           <Image
-            source={require('../assets/images/HomeScreenBg.png')}
+            source={require('../assets/images/StatsCardBg.png')}
             style={styles.statsBannerBgImage}
             resizeMode="cover"
           />
@@ -244,7 +453,10 @@ export default function HomeScreen() {
                   <Text style={styles.functionCardText}>My Sightings</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.functionCard}>
+                <TouchableOpacity 
+                  style={styles.functionCard}
+                  onPress={() => setShowMapViewScreen(true)}
+                >
                   <View style={styles.functionCardIcon}>
                     <MaterialCommunityIcons name="map-marker" size={32} color={colors.primary} />
                   </View>
@@ -275,6 +487,18 @@ export default function HomeScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Floating Action Button */}
+      <TouchableOpacity 
+        style={styles.fab}
+        onPress={() => {
+          // Handle FAB press - you can add navigation or action here
+          console.log('FAB pressed');
+        }}
+        activeOpacity={0.8}
+      >
+        <MaterialCommunityIcons name="plus" size={28} color="#ffffff" />
+      </TouchableOpacity>
 
       {/* Notification Drawer */}
       <NotificationDrawer
@@ -309,6 +533,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.surface,
   },
   backgroundImage: {
     opacity: 1,
@@ -321,17 +546,28 @@ const styles = StyleSheet.create({
   },
   updatesContainer: {
     paddingTop: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
     paddingBottom: theme.spacing.md,
+  },
+  updatesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
+    paddingHorizontal: theme.spacing.md,
     color: colors.textDark,
-    marginBottom: 12,
+  },
+  viewAllButton: {
+    fontSize: 14,
+    fontWeight: '600',
+    paddingRight: theme.spacing.md,
+    color: colors.primary,
   },
   updatesScrollContent: {
-    paddingRight: theme.spacing.md,
+    paddingHorizontal: Dimensions.get('window').width / 2 - 140, // Center cards: (screenWidth / 2) - (cardWidth / 2)
   },
   updateCard: {
     width: 280,
@@ -370,7 +606,7 @@ const styles = StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: theme.spacing.sm,
+    marginTop: theme.spacing.md,
     gap: 6,
     justifyContent: 'center',
   },
@@ -488,7 +724,7 @@ const styles = StyleSheet.create({
   },
   statsBannerContainer: {
     backgroundColor: colors.primary,
-    marginTop: theme.spacing.md,
+    marginTop: theme.spacing.sm,
     paddingTop: theme.spacing.lg,
     borderRadius: theme.borderRadius.xxxl,
     overflow: 'hidden',
@@ -501,7 +737,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     transform: [{ scaleX: -1 }],
-    opacity: 0.3,
+    opacity: 1,
   },
   statsCardsContainer: {
     paddingHorizontal: theme.spacing.md,
@@ -557,6 +793,7 @@ const styles = StyleSheet.create({
   },
   cardsContainer: {
     gap: theme.spacing.md,
+    marginTop: theme.spacing.md,
   },
   cardsRow: {
     flexDirection: 'row',
@@ -603,5 +840,21 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 10,
     fontWeight: 'bold',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: theme.spacing.lg,
+    right: theme.spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
 });

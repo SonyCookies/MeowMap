@@ -1,3 +1,4 @@
+// 1. React and React Native
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -11,15 +12,22 @@ import {
   Modal,
   Image,
 } from 'react-native';
+
+// 2. Third-party libraries
 import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
-import { useAuth } from '../contexts/AuthContext';
-import { colors } from '../constants/theme';
+
+// 3. Local utilities and hooks
+import { validateEmail } from '../utils/emailValidation';
+import { checkPasswordStrength } from '../utils/passwordStrength';
+import { formatCooldown } from '../utils/cooldown';
+import { useBiometricAuth } from '../hooks/useBiometricAuth';
+import { useLoginAttempts } from '../hooks/useLoginAttempts';
 import { supabase } from '../lib/supabase';
 
-// Import extracted components
+// 4. Local components
 import EmailInput from '../components/auth/EmailInput';
 import PasswordInput from '../components/auth/PasswordInput';
 import PasswordStrengthIndicator from '../components/auth/PasswordStrengthIndicator';
@@ -29,14 +37,9 @@ import SuccessModal from '../components/auth/SuccessModal';
 import TermsModal from '../components/auth/TermsModal';
 import PrivacyModal from '../components/auth/PrivacyModal';
 
-// Import extracted hooks
-import { useBiometricAuth } from '../hooks/useBiometricAuth';
-import { useLoginAttempts } from '../hooks/useLoginAttempts';
-
-// Import extracted utilities
-import { validateEmail } from '../utils/emailValidation';
-import { checkPasswordStrength } from '../utils/passwordStrength';
-import { formatCooldown } from '../utils/cooldown';
+// 5. Constants and contexts
+import { colors } from '../constants/theme';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function AuthScreen() {
   const [showEmailModal, setShowEmailModal] = useState(false);

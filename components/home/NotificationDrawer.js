@@ -10,13 +10,14 @@ import {
   Dimensions,
   ScrollView,
   Platform,
+  TextInput,
 } from 'react-native';
 
 // 2. Third-party libraries
 import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 
 // 3. Local utilities and hooks
-// (None in this component)
+import { formatTimeAgo } from '../../utils/notifications';
 
 // 4. Local components
 // (None in this component)
@@ -35,6 +36,7 @@ const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsR
   const slideAnim = useRef(new Animated.Value(DRAWER_WIDTH)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = React.useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (visible) {
@@ -91,6 +93,16 @@ const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsR
       onNotificationPress(notification);
     }
   };
+
+  // Filter notifications based on search query
+  const filteredNotifications = notifications.filter((notification) => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    const title = (notification.title || '').toLowerCase();
+    const message = (notification.message || '').toLowerCase();
+    const type = (notification.type || '').toLowerCase();
+    return title.includes(query) || message.includes(query) || type.includes(query);
+  });
 
   // Don't render modal if not mounted (after closing animation)
   if (!visible && !mounted) {
@@ -151,29 +163,57 @@ const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsR
             </View>
           </View>
 
+          {/* Search Bar */}
+          {notifications.length > 0 && (
+            <View style={styles.searchContainer}>
+              <FontAwesome name="search" size={16} color={colors.text} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search notifications..."
+                placeholderTextColor={colors.text}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setSearchQuery('')}
+                  style={styles.clearSearchButton}
+                >
+                  <FontAwesome name="times-circle" size={16} color={colors.text} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
           {/* Notifications List */}
           <ScrollView
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {notifications.length === 0 ? (
+            {filteredNotifications.length === 0 ? (
               <View style={styles.emptyState}>
                 <View style={styles.emptyStateIcon}>
                   <FontAwesome
-                    name="bell-slash"
+                    name={searchQuery ? "search" : "bell-slash"}
                     size={48}
                     color={colors.text}
                     style={{ opacity: 0.3 }}
                   />
                 </View>
-                <Text style={styles.emptyStateTitle}>No notifications</Text>
+                <Text style={styles.emptyStateTitle}>
+                  {searchQuery ? 'No results found' : 'No notifications'}
+                </Text>
                 <Text style={styles.emptyStateText}>
-                  You're all caught up! New notifications will appear here.
+                  {searchQuery 
+                    ? 'Try adjusting your search terms.'
+                    : "You're all caught up! New notifications will appear here."}
                 </Text>
               </View>
             ) : (
-              notifications.map((notification, index) => (
+              filteredNotifications.map((notification, index) => (
                 <NotificationItem
                   key={notification.id || index}
                   notification={notification}
@@ -194,6 +234,26 @@ const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsR
 const NotificationItem = ({ notification, onPress }) => {
   const isRead = notification.read || false;
 
+  // Format time - use existing time property or format from created_at
+  const getFormattedTime = () => {
+    if (notification.time) {
+      return notification.time;
+    }
+    
+    // Fallback: format from created_at or createdAt
+    const createdAt = notification.created_at || notification.createdAt;
+    if (createdAt) {
+      try {
+        return formatTimeAgo(createdAt);
+      } catch (error) {
+        console.error('Error formatting notification time:', error);
+        return 'now';
+      }
+    }
+    
+    return 'now';
+  };
+
   return (
     <TouchableOpacity
       style={[styles.notificationItem, !isRead && styles.notificationItemUnread]}
@@ -204,7 +264,7 @@ const NotificationItem = ({ notification, onPress }) => {
       <View style={styles.notificationContent}>
         <View style={styles.notificationHeader}>
           <Text style={styles.notificationTitle}>{notification.title}</Text>
-          <Text style={styles.notificationTime}>{notification.time}</Text>
+          <Text style={styles.notificationTime}>{getFormattedTime()}</Text>
         </View>
         {notification.message && (
           <Text
@@ -291,6 +351,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing.sm,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: theme.spacing.md,
+    marginVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    backgroundColor: colors.cream,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchIcon: {
+    marginRight: theme.spacing.sm,
+    opacity: 0.6,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textDark,
+    padding: 0,
+  },
+  clearSearchButton: {
+    marginLeft: theme.spacing.xs,
+    padding: 4,
   },
   markAllButton: {
     paddingHorizontal: theme.spacing.sm,

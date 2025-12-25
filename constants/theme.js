@@ -11,7 +11,7 @@
 
 export const colors = {
   // Primary Colors
-  primary: '#d0854f',      // Warm orange-brown
+  primary: '#dd7100',      // Warm orange-brown
   accent: '#f2cd89',       // Pale yellow/goldenrod
   beige: '#dec4a9',        // Light beige/sandy tan
   darkGray: '#6f6d6b',     // Dark neutral gray
