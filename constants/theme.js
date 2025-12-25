@@ -70,6 +70,10 @@ export const theme = {
     lg: 24,
     xl: 32,
     xxl: 48,
+    xxxl: 64,
+    xxxxl: 80,
+    xxxxxl: 96,
+    xxxxxxl: 112,
   },
   borderRadius: {
     sm: 4,

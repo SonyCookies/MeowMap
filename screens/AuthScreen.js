@@ -22,9 +22,9 @@ import * as SecureStore from 'expo-secure-store';
 // 3. Local utilities and hooks
 import { validateEmail } from '../utils/emailValidation';
 import { checkPasswordStrength } from '../utils/passwordStrength';
-import { formatCooldown } from '../utils/cooldown';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import { useLoginAttempts } from '../hooks/useLoginAttempts';
+import { useCooldown } from '../hooks/useCooldown';
 import { supabase } from '../lib/supabase';
 
 // 4. Local components
@@ -36,6 +36,8 @@ import ErrorModal from '../components/auth/ErrorModal';
 import SuccessModal from '../components/auth/SuccessModal';
 import TermsModal from '../components/auth/TermsModal';
 import PrivacyModal from '../components/auth/PrivacyModal';
+import ForgotPasswordModal from '../components/auth/ForgotPasswordModal';
+import EmailVerificationModal from '../components/auth/EmailVerificationModal';
 
 // 5. Constants and contexts
 import { colors } from '../constants/theme';
@@ -57,15 +59,25 @@ export default function AuthScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
   const [resendLoading, setResendLoading] = useState(false);
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
-  const [forgotPasswordCooldown, setForgotPasswordCooldown] = useState(0);
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const { signIn, signUp, forgotPassword } = useAuth();
+
+  // Use cooldown hooks
+  const { cooldown: resendCooldown, startCooldown: startResendCooldown } = useCooldown(
+    'resendVerificationCooldown',
+    300,
+    email
+  );
+  const { cooldown: forgotPasswordCooldown, startCooldown: startForgotPasswordCooldown } = useCooldown(
+    'forgotPasswordCooldown',
+    300,
+    forgotPasswordEmail
+  );
   
   // Use extracted hooks
   const {
@@ -84,32 +96,6 @@ export default function AuthScreen() {
     getRemainingLockTime,
   } = useLoginAttempts(email);
 
-  // Restore forgot password cooldown from AsyncStorage on mount
-  useEffect(() => {
-    const restoreForgotPasswordCooldown = async () => {
-      try {
-        const storedData = await AsyncStorage.getItem('forgotPasswordCooldown');
-        if (storedData) {
-          const { email, timestamp } = JSON.parse(storedData);
-          const now = Date.now();
-          const elapsed = Math.floor((now - timestamp) / 1000);
-          const remaining = Math.max(0, 300 - elapsed); // 300 seconds = 5 minutes
-
-          if (remaining > 0) {
-            setForgotPasswordCooldown(remaining);
-            setForgotPasswordEmail(email);
-          } else {
-            // Cooldown expired, remove from storage
-            await AsyncStorage.removeItem('forgotPasswordCooldown');
-          }
-        }
-      } catch (error) {
-        console.error('Error restoring forgot password cooldown:', error);
-      }
-    };
-
-    restoreForgotPasswordCooldown();
-  }, []);
 
   // Restore Remember Me preference on mount
   useEffect(() => {
@@ -213,24 +199,6 @@ export default function AuthScreen() {
     }
   };
 
-  // Cooldown timer effect
-  useEffect(() => {
-    let interval = null;
-    if (resendCooldown > 0) {
-      interval = setInterval(() => {
-        setResendCooldown((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [resendCooldown]);
 
   // Resend verification email
   const handleResendVerificationEmail = async () => {
@@ -251,7 +219,7 @@ export default function AuthScreen() {
         setShowErrorModal(true);
       } else {
         // Start 5-minute cooldown (300 seconds)
-        setResendCooldown(300);
+        startResendCooldown(email);
       }
     } catch (error) {
       setErrorMessage(error.message || 'An unexpected error occurred');
@@ -262,37 +230,6 @@ export default function AuthScreen() {
   };
 
 
-  // Forgot password cooldown timer effect
-  useEffect(() => {
-    let interval = null;
-    if (forgotPasswordCooldown > 0) {
-      interval = setInterval(async () => {
-        setForgotPasswordCooldown((prev) => {
-          const newValue = prev <= 1 ? 0 : prev - 1;
-          
-          // Update AsyncStorage when cooldown changes
-          if (newValue === 0) {
-            // Cooldown finished, remove from storage
-            AsyncStorage.removeItem('forgotPasswordCooldown').catch(console.error);
-          } else if (forgotPasswordEmail) {
-            // Update timestamp in storage
-            AsyncStorage.setItem('forgotPasswordCooldown', JSON.stringify({
-              email: forgotPasswordEmail,
-              timestamp: Date.now() - (300 - newValue) * 1000, // Calculate original timestamp
-            })).catch(console.error);
-          }
-          
-          if (prev <= 1) {
-            clearInterval(interval);
-          }
-          return newValue;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [forgotPasswordCooldown, forgotPasswordEmail]);
 
   // Handle forgot password
   const handleForgotPassword = async () => {
@@ -310,32 +247,6 @@ export default function AuthScreen() {
       return;
     }
 
-    // Check if there's an active cooldown for this email (persisted in AsyncStorage)
-    try {
-      const storedData = await AsyncStorage.getItem('forgotPasswordCooldown');
-      if (storedData) {
-        const { email: storedEmail, timestamp } = JSON.parse(storedData);
-        if (storedEmail === forgotPasswordEmail) {
-          const now = Date.now();
-          const elapsed = Math.floor((now - timestamp) / 1000);
-          const remaining = Math.max(0, 300 - elapsed);
-          
-          if (remaining > 0) {
-            setForgotPasswordCooldown(remaining);
-            const minutes = Math.ceil(remaining / 60);
-            setErrorMessage(`Please wait ${minutes} minute(s) before requesting another reset link.`);
-            setShowErrorModal(true);
-            return;
-          } else {
-            // Cooldown expired, remove from storage
-            await AsyncStorage.removeItem('forgotPasswordCooldown');
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error checking forgot password cooldown:', error);
-    }
-
     if (forgotPasswordCooldown > 0 || forgotPasswordLoading) return;
 
     setForgotPasswordLoading(true);
@@ -346,22 +257,8 @@ export default function AuthScreen() {
         setErrorMessage(error.message || 'Failed to send password reset email');
         setShowErrorModal(true);
       } else {
-        // Supabase returns success even if email doesn't exist (for security)
         // Start 5-minute cooldown (300 seconds)
-        const cooldownSeconds = 300;
-        setForgotPasswordCooldown(cooldownSeconds);
-        
-        // Store cooldown in AsyncStorage to persist across app restarts
-        try {
-          await AsyncStorage.setItem('forgotPasswordCooldown', JSON.stringify({
-            email: forgotPasswordEmail,
-            timestamp: Date.now(),
-          }));
-        } catch (storageError) {
-          console.error('Error saving forgot password cooldown:', storageError);
-        }
-        
-        // Note: Email will be sent if the email exists in the system
+        startForgotPasswordCooldown(forgotPasswordEmail);
       }
     } catch (error) {
       setErrorMessage(error.message || 'An unexpected error occurred');
@@ -968,171 +865,34 @@ export default function AuthScreen() {
       />
 
       {/* Forgot Password Modal */}
-      <Modal
+      <ForgotPasswordModal
         visible={showForgotPasswordModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
+        email={forgotPasswordEmail}
+        onEmailChange={setForgotPasswordEmail}
+        cooldown={forgotPasswordCooldown}
+        loading={forgotPasswordLoading}
+        onClose={() => {
           setShowForgotPasswordModal(false);
           setForgotPasswordEmail('');
         }}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalContainer}
-        >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <View style={styles.closeButtonPlaceholder} />
-              <TouchableOpacity 
-                onPress={() => {
-                  setShowForgotPasswordModal(false);
-                  setForgotPasswordEmail('');
-                }}
-                style={styles.closeButton}
-              >
-                <Text style={styles.closeButtonText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Logo */}
-            <View style={styles.modalLogoContainer}>
-              <Image 
-                source={require('../assets/images/Logo.png')}
-                style={styles.modalLogo}
-                resizeMode="contain"
-              />
-            </View>
-
-            {/* Wordmark */}
-            <View style={styles.modalWordmarkContainer}>
-              <Image 
-                source={require('../assets/images/Wordmark.png')}
-                style={styles.modalWordmark}
-                resizeMode="contain"
-              />
-            </View>
-
-            <Text style={styles.modalTitle}>Forgot Password</Text>
-            <Text style={styles.forgotPasswordSubtitle}>
-              Enter your email address and we'll send you a link to reset your password.
-            </Text>
-
-            <EmailInput
-              value={forgotPasswordEmail}
-              onChangeText={setForgotPasswordEmail}
-              editable={!forgotPasswordLoading}
-            />
-
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                (forgotPasswordLoading || forgotPasswordCooldown > 0) && styles.buttonDisabled
-              ]}
-              onPress={handleForgotPassword}
-              disabled={forgotPasswordLoading || forgotPasswordCooldown > 0}
-            >
-              {forgotPasswordLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>
-                  {forgotPasswordCooldown > 0 
-                    ? `Resend in ${formatCooldown(forgotPasswordCooldown)}`
-                    : 'Send Reset Link'
-                  }
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            {forgotPasswordCooldown > 0 && (
-              <View style={styles.forgotPasswordSuccessContainer}>
-                <Text style={styles.forgotPasswordCooldownText}>
-                  If an account exists with this email, a password reset link has been sent. Please check your inbox and spam folder.
-                </Text>
-                <Text style={[styles.forgotPasswordCooldownText, { marginTop: 8, fontSize: 12 }]}>
-                  You can request another email in {formatCooldown(forgotPasswordCooldown)}.
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.switchContainer}>
-              <Text style={styles.switchText}>Remember your password? </Text>
-              <TouchableOpacity 
-                onPress={() => {
-                  setShowForgotPasswordModal(false);
-                  setEmail(forgotPasswordEmail); // Pre-fill email in sign-in
-                  setForgotPasswordEmail('');
-                  setShowEmailModal(true);
-                  setIsSignUp(false);
-                }}
-                disabled={forgotPasswordLoading}
-              >
-                <Text style={styles.switchLink}>Sign In</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        onSubmit={handleForgotPassword}
+        onSignInPress={() => {
+          setShowForgotPasswordModal(false);
+          setEmail(forgotPasswordEmail);
+          setForgotPasswordEmail('');
+          setShowEmailModal(true);
+          setIsSignUp(false);
+        }}
+      />
 
       {/* Email Verification Modal */}
-      <Modal
+      <EmailVerificationModal
         visible={showEmailVerificationModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowEmailVerificationModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.emailVerificationModalContent}>
-            {/* Email Icon */}
-            <View style={styles.emailVerificationIconContainer}>
-              <View style={styles.emailVerificationIconCircle}>
-                <FontAwesome name="envelope" size={48} color="#fff" />
-              </View>
-            </View>
-
-            <Text style={styles.emailVerificationModalTitle}>Email Not Verified</Text>
-            <Text style={styles.emailVerificationModalText}>
-              Please verify your email address before signing in. We've sent a verification email to your inbox.
-            </Text>
-            <Text style={styles.emailVerificationModalSubtext}>
-              Didn't receive the email? Check your spam folder or click below to resend.
-            </Text>
-
-            <View style={styles.emailVerificationButtonContainer}>
-              {/* Resend Button */}
-              <TouchableOpacity
-                style={[
-                  styles.emailVerificationResendButton,
-                  (resendCooldown > 0 || resendLoading) && styles.emailVerificationResendButtonDisabled
-                ]}
-                onPress={handleResendVerificationEmail}
-                disabled={resendCooldown > 0 || resendLoading}
-              >
-                {resendLoading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.emailVerificationResendButtonText}>
-                    {resendCooldown > 0 
-                      ? `Resend in ${formatCooldown(resendCooldown)}`
-                      : 'Resend Verification Email'
-                    }
-                  </Text>
-                )}
-              </TouchableOpacity>
-
-              <View style={{ height: 12 }} />
-
-              {/* OK Button */}
-              <TouchableOpacity
-                style={[styles.emailVerificationButton, styles.emailVerificationButtonSecondary]}
-                onPress={() => setShowEmailVerificationModal(false)}
-              >
-                <Text style={styles.emailVerificationButtonTextSecondary}>OK</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        cooldown={resendCooldown}
+        loading={resendLoading}
+        onClose={() => setShowEmailVerificationModal(false)}
+        onResend={handleResendVerificationEmail}
+      />
     </View>
   );
 }
@@ -1696,100 +1456,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  // Email Verification Modal Styles
-  emailVerificationModalContent: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 24,
-    width: '90%',
-    maxWidth: 400,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  emailVerificationIconContainer: {
-    marginTop: 8,
-    marginBottom: 24,
-    alignItems: 'center',
-    width: '100%',
-  },
-  emailVerificationIconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emailVerificationModalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.textDark,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  emailVerificationModalText: {
-    fontSize: 14,
-    color: colors.text,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 12,
-    paddingHorizontal: 8,
-  },
-  emailVerificationModalSubtext: {
-    fontSize: 12,
-    color: colors.text,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 32,
-    paddingHorizontal: 8,
-    fontStyle: 'italic',
-  },
-  emailVerificationButtonContainer: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  emailVerificationButton: {
-    backgroundColor: colors.buttonPrimary,
-    borderRadius: 8,
-    padding: 16,
-    width: '100%',
-    alignItems: 'center',
-  },
-  emailVerificationButtonSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  emailVerificationButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  emailVerificationButtonTextSecondary: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  emailVerificationResendButton: {
-    backgroundColor: colors.buttonPrimary,
-    borderRadius: 8,
-    padding: 16,
-    width: '100%',
-    alignItems: 'center',
-  },
-  emailVerificationResendButtonDisabled: {
-    backgroundColor: colors.buttonDisabled,
-    opacity: 0.6,
-  },
-  emailVerificationResendButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
   // Forgot Password Styles
   rememberMeContainer: {
     flexDirection: 'row',
@@ -1829,23 +1495,5 @@ const styles = StyleSheet.create({
     color: colors.link,
     fontSize: 14,
     fontWeight: '500',
-  },
-  forgotPasswordSubtitle: {
-    fontSize: 14,
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
-    paddingHorizontal: 8,
-  },
-  forgotPasswordSuccessContainer: {
-    marginTop: 16,
-    paddingHorizontal: 16,
-  },
-  forgotPasswordCooldownText: {
-    fontSize: 12,
-    color: colors.success,
-    textAlign: 'center',
-    lineHeight: 18,
   },
 });

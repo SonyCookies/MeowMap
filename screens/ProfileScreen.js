@@ -17,16 +17,19 @@ import {
 } from 'react-native';
 
 // 2. Third-party libraries
-import * as ImagePicker from 'expo-image-picker';
 import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 
 // 3. Local utilities and hooks
-import { getProfile, upsertProfile, uploadAvatar } from '../services/profileService';
+import { getProfile, upsertProfile } from '../services/profileService';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotifications } from '../contexts/NotificationContext';
+import { validateProfileForm } from '../utils/profileValidation';
+import { useAvatarUpload } from '../hooks/useAvatarUpload';
+import { useImagePicker } from '../hooks/useImagePicker';
 
 // 4. Local components
 import AvatarPreviewModal from '../components/profile/AvatarPreviewModal';
+import ProfileForm from '../components/profile/ProfileForm';
 
 // 5. Constants and contexts
 import { colors, theme } from '../constants/theme';
@@ -54,9 +57,24 @@ export default function ProfileScreen({ onBack }) {
   const [locationError, setLocationError] = useState('');
   const [phoneError, setPhoneError] = useState('');
 
+  // Use custom hooks
+  const { imageUri: pickedImageUri, showImagePickerOptions, setImageUri } = useImagePicker({
+    allowsEditing: true,
+    aspect: [1, 1],
+    quality: 0.8,
+  });
+  const { uploading: avatarUploading, upload: uploadAvatarImage } = useAvatarUpload(user?.id);
+
   useEffect(() => {
     loadProfile();
   }, [user]);
+
+  // Update avatarUri when image is picked
+  useEffect(() => {
+    if (pickedImageUri) {
+      setAvatarUri(pickedImageUri);
+    }
+  }, [pickedImageUri]);
 
   const loadProfile = async () => {
     if (!user?.id) {
@@ -109,94 +127,28 @@ export default function ProfileScreen({ onBack }) {
   };
 
   const validateForm = () => {
-    let isValid = true;
+    const result = validateProfileForm({
+      displayName,
+      bio,
+      location,
+      phoneNumber,
+    });
 
-    // Validate display name
-    if (!displayName.trim()) {
-      setDisplayNameError('Display name is required');
-      isValid = false;
-    } else {
-      setDisplayNameError('');
-    }
+    setDisplayNameError(result.errors.displayName);
+    setBioError(result.errors.bio);
+    setLocationError(result.errors.location);
+    setPhoneError(result.errors.phone);
 
-    // Validate bio (minimum 10 characters)
-    if (!bio.trim() || bio.trim().length < 10) {
-      setBioError('Bio must be at least 10 characters');
-      isValid = false;
-    } else {
-      setBioError('');
-    }
-
-    // Validate location
-    if (!location.trim()) {
-      setLocationError('Location is required');
-      isValid = false;
-    } else {
-      setLocationError('');
-    }
-
-    // Validate phone number (PH format +63)
-    const phoneRegex = /^\+63\d{10}$/;
-    if (!phoneNumber.trim()) {
-      setPhoneError('Phone number is required');
-      isValid = false;
-    } else if (!phoneRegex.test(phoneNumber.trim())) {
-      setPhoneError('Phone number must be in format +63XXXXXXXXXX');
-      isValid = false;
-    } else {
-      setPhoneError('');
-    }
-
-    return isValid;
-  };
-
-  const formatPhoneNumber = (text) => {
-    // Remove all non-digits
-    const digits = text.replace(/\D/g, '');
-    
-    // If starts with 63, add + prefix
-    if (digits.startsWith('63')) {
-      return `+${digits}`;
-    }
-    // If starts with 0, replace with +63
-    if (digits.startsWith('0')) {
-      return `+63${digits.substring(1)}`;
-    }
-    // If doesn't start with anything, add +63
-    if (digits.length > 0) {
-      return `+63${digits}`;
-    }
-    return text;
+    return result.isValid;
   };
 
   const handlePhoneChange = (text) => {
-    const formatted = formatPhoneNumber(text);
-    setPhoneNumber(formatted);
+    setPhoneNumber(text);
     if (phoneError) setPhoneError('');
   };
 
-  const handlePickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please grant camera roll permissions to upload an avatar.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType?.Images || 'images',
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setAvatarUri(result.assets[0].uri);
-        setAvatarUrl(null); // Clear existing URL when new image is selected
-      }
-    } catch (error) {
-      console.error('Error picking image:', error);
-    }
+  const handlePickImage = () => {
+    showImagePickerOptions();
   };
 
   const handleSave = async () => {
@@ -210,11 +162,11 @@ export default function ProfileScreen({ onBack }) {
 
       // Upload new avatar if one was selected
       if (avatarUri) {
-        const { data: uploadData, error: uploadError } = await uploadAvatar(user.id, avatarUri);
-        if (uploadError) {
+        const uploadResult = await uploadAvatarImage(avatarUri);
+        if (!uploadResult) {
           throw new Error('Failed to upload avatar. Please try again.');
         }
-        finalAvatarUrl = uploadData.url;
+        finalAvatarUrl = uploadResult.url;
       }
 
       // Update profile
@@ -235,6 +187,7 @@ export default function ProfileScreen({ onBack }) {
       setProfile(data);
       setAvatarUrl(finalAvatarUrl);
       setAvatarUri(null);
+      setImageUri(null);
       setEditing(false);
 
       // Create notification for profile update
@@ -304,9 +257,9 @@ export default function ProfileScreen({ onBack }) {
               <TouchableOpacity
                 style={[styles.headerButton, styles.headerButtonPrimary]}
                 onPress={handleSave}
-                disabled={saving}
+                disabled={saving || avatarUploading}
               >
-                {saving ? (
+                {(saving || avatarUploading) ? (
                   <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
                   <Text style={[styles.headerButtonText, styles.headerButtonTextPrimary]}>
@@ -374,135 +327,33 @@ export default function ProfileScreen({ onBack }) {
           </View>
 
           {/* Profile Information */}
-          <View style={styles.infoSection}>
-            {/* Display Name */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Display Name</Text>
-              {editing ? (
-                <>
-                  <TextInput
-                    style={[styles.input, displayNameError && styles.inputError]}
-                    value={displayName}
-                    onChangeText={(text) => {
-                      setDisplayName(text);
-                      if (displayNameError) setDisplayNameError('');
-                    }}
-                    placeholder="Enter your display name"
-                    placeholderTextColor={colors.text}
-                    editable={!saving}
-                  />
-                  {displayNameError ? (
-                    <Text style={styles.errorText}>{displayNameError}</Text>
-                  ) : null}
-                </>
-              ) : (
-                <Text style={styles.fieldValue}>{profile?.display_name || 'Not set'}</Text>
-              )}
-            </View>
-
-            {/* Email (Read-only) */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Email</Text>
-              <Text style={[styles.fieldValue, styles.fieldValueMuted]}>
-                {user?.email || 'Not set'}
-              </Text>
-              {user?.email_confirmed_at ? (
-                <View style={styles.verifiedBadge}>
-                  <FontAwesome name="check-circle" size={14} color={colors.success} />
-                  <Text style={styles.verifiedText}>Verified</Text>
-                </View>
-              ) : (
-                <Text style={styles.unverifiedText}>Email not verified</Text>
-              )}
-            </View>
-
-            {/* Bio */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Bio</Text>
-              {editing ? (
-                <>
-                  <TextInput
-                    style={[
-                      styles.input,
-                      styles.textArea,
-                      bioError && styles.inputError,
-                    ]}
-                    value={bio}
-                    onChangeText={(text) => {
-                      setBio(text);
-                      if (bioError) setBioError('');
-                    }}
-                    placeholder="Tell us about yourself (minimum 10 characters)"
-                    placeholderTextColor={colors.text}
-                    multiline
-                    numberOfLines={4}
-                    textAlignVertical="top"
-                    editable={!saving}
-                  />
-                  <Text style={styles.fieldHint}>
-                    {bio.length}/10 minimum characters
-                  </Text>
-                  {bioError ? <Text style={styles.errorText}>{bioError}</Text> : null}
-                </>
-              ) : (
-                <Text style={styles.fieldValue}>
-                  {profile?.bio || 'Not set'}
-                </Text>
-              )}
-            </View>
-
-            {/* Location */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Location</Text>
-              {editing ? (
-                <>
-                  <TextInput
-                    style={[styles.input, locationError && styles.inputError]}
-                    value={location}
-                    onChangeText={(text) => {
-                      setLocation(text);
-                      if (locationError) setLocationError('');
-                    }}
-                    placeholder="Barangay, City/Municipality, Province"
-                    placeholderTextColor={colors.text}
-                    editable={!saving}
-                  />
-                  {locationError ? (
-                    <Text style={styles.errorText}>{locationError}</Text>
-                  ) : null}
-                </>
-              ) : (
-                <Text style={styles.fieldValue}>
-                  {profile?.location || 'Not set'}
-                </Text>
-              )}
-            </View>
-
-            {/* Phone Number */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Phone Number</Text>
-              {editing ? (
-                <>
-                  <TextInput
-                    style={[styles.input, phoneError && styles.inputError]}
-                    value={phoneNumber}
-                    onChangeText={handlePhoneChange}
-                    placeholder="+63XXXXXXXXXX"
-                    placeholderTextColor={colors.text}
-                    keyboardType="phone-pad"
-                    editable={!saving}
-                  />
-                  {phoneError ? (
-                    <Text style={styles.errorText}>{phoneError}</Text>
-                  ) : null}
-                </>
-              ) : (
-                <Text style={styles.fieldValue}>
-                  {profile?.phone_number || 'Not set'}
-                </Text>
-              )}
-            </View>
-          </View>
+          <ProfileForm
+            editing={editing}
+            displayName={editing ? displayName : (profile?.display_name || '')}
+            displayNameError={displayNameError}
+            onDisplayNameChange={(text) => {
+              setDisplayName(text);
+              if (displayNameError) setDisplayNameError('');
+            }}
+            email={user?.email || ''}
+            emailVerified={!!user?.email_confirmed_at}
+            bio={editing ? bio : (profile?.bio || '')}
+            bioError={bioError}
+            onBioChange={(text) => {
+              setBio(text);
+              if (bioError) setBioError('');
+            }}
+            location={editing ? location : (profile?.location || '')}
+            locationError={locationError}
+            onLocationChange={(text) => {
+              setLocation(text);
+              if (locationError) setLocationError('');
+            }}
+            phoneNumber={editing ? phoneNumber : (profile?.phone_number || '')}
+            phoneError={phoneError}
+            onPhoneChange={handlePhoneChange}
+            saving={saving || avatarUploading}
+          />
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -682,50 +533,6 @@ const styles = StyleSheet.create({
   fieldValueMuted: {
     color: colors.text,
     opacity: 0.8,
-  },
-  input: {
-    fontSize: 16,
-    color: colors.textDark,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  inputError: {
-    borderColor: colors.error,
-  },
-  textArea: {
-    minHeight: 100,
-    paddingTop: theme.spacing.sm,
-  },
-  fieldHint: {
-    fontSize: 12,
-    color: colors.text,
-    opacity: 0.6,
-    marginTop: theme.spacing.xs,
-  },
-  errorText: {
-    fontSize: 12,
-    color: colors.error,
-    marginTop: theme.spacing.xs,
-  },
-  verifiedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: theme.spacing.xs,
-  },
-  verifiedText: {
-    fontSize: 12,
-    color: colors.success,
-    fontWeight: '600',
-  },
-  unverifiedText: {
-    fontSize: 12,
-    color: colors.error,
-    marginTop: theme.spacing.xs,
   },
 });
 

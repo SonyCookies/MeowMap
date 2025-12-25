@@ -129,6 +129,7 @@ export const createSighting = async (userId, sightingData) => {
  * @param {number} options.latitude - Optional: filter by latitude bounds
  * @param {number} options.longitude - Optional: filter by longitude bounds
  * @param {number} options.radius - Optional: radius in kilometers for location-based filtering
+ * @param {string} options.dateFilter - Optional: filter by date ('today', 'yesterday', '7days', '30days', '365days', 'all')
  * @returns {Promise<{data: Array, error: Object|null}>}
  */
 export const getSightings = async (options = {}) => {
@@ -138,12 +139,46 @@ export const getSightings = async (options = {}) => {
       .select('*')
       .order('created_at', { ascending: false });
 
+    // Apply date filter if provided
+    if (options.dateFilter && options.dateFilter !== 'all') {
+      const now = new Date();
+      let startDate;
+      let endDate;
+
+      switch (options.dateFilter) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+          break;
+        case 'yesterday':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+          endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case '7days':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case '30days':
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        case '365days':
+          startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+          break;
+        default:
+          break;
+      }
+
+      // Apply date filter
+      if (startDate) {
+        query = query.gte('created_at', startDate.toISOString());
+      }
+      if (endDate) {
+        query = query.lt('created_at', endDate.toISOString());
+      }
+    }
+
     if (options.limit) {
       query = query.limit(options.limit);
     }
-
-    // TODO: Add location-based filtering if needed
-    // For now, we'll get all sightings and filter on the client side if needed
 
     const { data, error } = await query;
 

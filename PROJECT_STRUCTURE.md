@@ -7,46 +7,107 @@ This document outlines the folder structure and organization conventions for the
 ```
 MeowMap/
 ├── assets/                 # Static assets (images, icons, fonts)
-│   ├── images/            # Image files (PNG, JPG)
-│   ├── icons/             # Icon files
-│   └── fonts/             # Custom fonts
+│   ├── images/            # Image files (PNG, JPG) - app logos, backgrounds, illustrations
+│   ├── icons/             # Icon files - UI icons organized by category
+│   │   └── ui-icons/      # User interface icons
+│   ├── fonts/             # Custom font files
+│   ├── svgs/              # SVG assets organized by type
+│   │   ├── icons/         # SVG icon files
+│   │   ├── illustrations/ # SVG illustrations
+│   │   └── logos/         # SVG logo files
+│   └── README.md          # Assets documentation
 │
-├── components/            # Reusable React components
-│   └── auth/              # Authentication-related components
-│       ├── EmailInput.js
-│       ├── PasswordInput.js
-│       ├── PasswordStrengthIndicator.js
-│       ├── RememberMeCheckbox.js
-│       ├── ErrorModal.js
-│       ├── SuccessModal.js
-│       ├── TermsModal.js
-│       └── PrivacyModal.js
+├── components/            # Reusable React components organized by feature
+│   ├── auth/              # Authentication-related components
+│   │   ├── EmailInput.js              # Email input field with validation
+│   │   ├── PasswordInput.js           # Password input with visibility toggle
+│   │   ├── PasswordStrengthIndicator.js # Visual password strength meter
+│   │   ├── RememberMeCheckbox.js      # Remember me checkbox component
+│   │   ├── ErrorModal.js              # Error message modal
+│   │   ├── SuccessModal.js            # Success message modal
+│   │   ├── TermsModal.js              # Terms of service modal
+│   │   ├── PrivacyModal.js            # Privacy policy modal
+│   │   ├── ForgotPasswordModal.js     # Password reset modal
+│   │   └── EmailVerificationModal.js  # Email verification prompt modal
+│   ├── home/              # Home screen components
+│   │   ├── FunctionCards.js            # Action cards (Map, Profile, etc.)
+│   │   ├── MenuDrawer.js               # Side menu drawer component
+│   │   ├── NotificationDrawer.js      # Notification panel drawer
+│   │   ├── StatsBanner.js              # Statistics display banner
+│   │   └── UpdatesCarousel.js          # News/updates carousel component
+│   ├── map/               # Map view components
+│   │   ├── CoatPatternPicker.js        # Cat coat pattern selection
+│   │   ├── ColorPicker.js              # Primary color selection
+│   │   ├── MapFilter.js                # Time-based filter for sightings
+│   │   ├── MapLayersControl.js        # Map layers toggle (heatmap, 3D)
+│   │   ├── MapMarkers.js               # Map marker components
+│   │   ├── MapStyleSelector.js         # Map style selector (Street, Satellite, etc.)
+│   │   ├── MapTiltControl.js           # Map pitch/tilt control buttons
+│   │   ├── SightingDetailModal.js      # Cat sighting details modal
+│   │   ├── SightingFormModal.js        # New sighting form modal
+│   │   └── SightingMarker.js           # Individual sighting marker component
+│   └── profile/           # Profile-related components
+│       ├── AvatarPreviewModal.js       # Avatar preview and crop modal
+│       ├── ProfileForm.js              # Profile editing form fields
+│       ├── ProfileProgressIndicator.js # Profile completion progress
+│       ├── ProfileSetupForm.js         # Initial profile setup form
+│       └── ProfileTaskItem.js          # Profile completion task item
 │
 ├── constants/             # Constants and configuration
-│   └── theme.js           # Color theme, spacing, typography
+│   └── theme.js           # Color theme, spacing, typography, border radius, etc.
 │
-├── contexts/              # React Context providers
-│   └── AuthContext.js     # Authentication context
+├── contexts/              # React Context providers for global state
+│   ├── AuthContext.js      # Authentication state and methods
+│   └── NotificationContext.js # Notification state and management
 │
-├── hooks/                 # Custom React hooks
-│   ├── useBiometricAuth.js
-│   └── useLoginAttempts.js
+├── hooks/                 # Custom React hooks for reusable logic
+│   ├── useAvatarUpload.js      # Avatar image upload logic
+│   ├── useBiometricAuth.js     # Biometric authentication (Face ID, Touch ID)
+│   ├── useCooldown.js          # Cooldown timer with AsyncStorage persistence
+│   ├── useImagePicker.js       # Image picker functionality (camera/gallery)
+│   ├── useInfiniteScroll.js    # Infinite scroll implementation for carousels
+│   ├── useLocationPermission.js # Location permission and GPS access
+│   ├── useLoginAttempts.js     # Login attempt tracking and rate limiting
+│   └── useProfileCheck.js      # Profile completion status checking
 │
-├── lib/                   # Third-party library configurations
-│   └── supabase.js        # Supabase client configuration
+├── lib/                   # Third-party library configurations and setup
+│   └── supabase.js        # Supabase client initialization and configuration
 │
 ├── screens/               # Screen components (main app screens)
-│   ├── AuthScreen.js      # Authentication screen
-│   └── HomeScreen.js      # Home screen
+│   ├── AuthScreen.js           # Authentication screen (login/signup)
+│   ├── HomeScreen.js           # Main home screen with navigation
+│   ├── MapViewScreen.js        # Interactive map view with sightings
+│   ├── ProfileScreen.js        # User profile viewing and editing
+│   ├── ProfileSetupScreen.js   # Initial profile setup wizard
+│   ├── UpdateDetailScreen.js   # Individual update/news detail view
+│   └── UpdatesListScreen.js    # List of all updates/news items
 │
-├── utils/                 # Utility functions and helpers
-│   ├── emailValidation.js
-│   ├── passwordStrength.js
-│   └── cooldown.js
+├── services/              # API service layer for backend operations
+│   ├── notificationService.js  # Notification CRUD operations
+│   ├── profileService.js       # User profile CRUD operations
+│   └── sightingService.js      # Cat sighting CRUD operations
+│
+├── utils/                 # Utility functions and helpers (pure functions)
+│   ├── cooldown.js             # Cooldown timer utilities
+│   ├── emailValidation.js      # Email validation functions
+│   ├── notifications.js        # Notification utility functions
+│   ├── passwordStrength.js     # Password strength calculation
+│   ├── phoneFormatting.js      # Phone number formatting utilities
+│   └── profileValidation.js    # Profile field validation functions
 │
 ├── email-templates/       # Email HTML templates
+│   ├── meowmap-email-templates.html    # General email template
+│   └── reset-password-template.html    # Password reset email template
 │
-└── [config files]         # package.json, app.json, etc.
+├── android/               # Android-specific configuration and build files
+│   ├── app/               # Android app module
+│   ├── gradle/            # Gradle wrapper files
+│   ├── gradle.properties  # Gradle configuration
+│   ├── setup-mapbox-token.ps1  # Windows script for Mapbox token setup
+│   ├── setup-mapbox-token.sh    # Unix script for Mapbox token setup
+│   └── SETUP.md           # Android setup instructions
+│
+└── [config files]         # package.json, app.json, eas.json, etc.
 ```
 
 ## 📝 Naming Conventions
@@ -157,15 +218,52 @@ All authentication-related components are in `components/auth/`:
 
 - **Form Inputs**: `EmailInput`, `PasswordInput`
 - **UI Elements**: `RememberMeCheckbox`, `PasswordStrengthIndicator`
-- **Modals**: `ErrorModal`, `SuccessModal`, `TermsModal`, `PrivacyModal`
+- **Modals**: `ErrorModal`, `SuccessModal`, `TermsModal`, `PrivacyModal`, `ForgotPasswordModal`, `EmailVerificationModal`
+
+## 🗺️ Map Components
+
+All map-related components are in `components/map/`:
+
+- **Form Components**: `SightingFormModal`, `CoatPatternPicker`, `ColorPicker`
+- **Map Controls**: `MapFilter`, `MapStyleSelector`, `MapLayersControl`, `MapTiltControl`
+- **Markers & Modals**: `SightingMarker`, `SightingDetailModal`, `MapMarkers`
+
+## 🏠 Home Components
+
+All home screen components are in `components/home/`:
+
+- **Navigation**: `MenuDrawer`, `NotificationDrawer`
+- **Content**: `StatsBanner`, `FunctionCards`, `UpdatesCarousel`
+
+## 👤 Profile Components
+
+All profile-related components are in `components/profile/`:
+
+- **Forms**: `ProfileForm`, `ProfileSetupForm`
+- **UI Elements**: `ProfileProgressIndicator`, `ProfileTaskItem`, `AvatarPreviewModal`
 
 ## 📱 Screen Components
 
 ### Location: `screens/`
-- Main app screens
+- Main app screens that represent full-page views
 - Should be lean and compose smaller components
 - Handle navigation and screen-specific logic
 - Maximum recommended size: ~500 lines (ideally less)
+- **Current Screens:**
+  - `AuthScreen.js` - Authentication (login/signup) with biometric support
+  - `HomeScreen.js` - Main dashboard with stats, updates, and navigation
+  - `MapViewScreen.js` - Interactive map with cat sightings, filters, and controls
+  - `ProfileScreen.js` - User profile viewing and editing
+  - `ProfileSetupScreen.js` - Initial profile setup wizard
+  - `UpdateDetailScreen.js` - Individual update/news detail view
+  - `UpdatesListScreen.js` - List view of all updates/news items
+
+### Screen Compliance Check
+✅ All screens follow the import pattern (1-5 grouping)
+✅ All screens use functional components with hooks
+✅ All screens use StyleSheet.create() for styles
+✅ All screens use default exports
+⚠️ Note: `MapViewScreen.js` (~1216 lines) and `AuthScreen.js` (~1500 lines) exceed the recommended 500-line limit but are functional and well-organized
 
 ## 🚀 Import Patterns
 

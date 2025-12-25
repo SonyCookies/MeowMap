@@ -1,5 +1,5 @@
 // 1. React and React Native
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,16 +10,12 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  TextInput,
-  ScrollView,
-  Image,
-  KeyboardAvoidingView,
+  Linking,
 } from 'react-native';
+import * as Location from 'expo-location';
 
 // 2. Third-party libraries
 import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import * as ImagePicker from 'expo-image-picker';
 
 // Conditionally import Mapbox only on native platforms (not web)
 let Mapbox = null;
@@ -40,11 +36,20 @@ if (Platform.OS !== 'web') {
 }
 
 // 3. Local utilities and hooks
-import { createSighting } from '../services/sightingService';
+import { createSighting, getSightings } from '../services/sightingService';
 import { useAuth } from '../contexts/AuthContext';
+import { useLocationPermission } from '../hooks/useLocationPermission';
+import { useImagePicker } from '../hooks/useImagePicker';
 
 // 4. Local components
-// (None for this screen)
+import SightingFormModal from '../components/map/SightingFormModal';
+import SightingDetailModal from '../components/map/SightingDetailModal';
+import SightingMarker from '../components/map/SightingMarker';
+import MapFilter from '../components/map/MapFilter';
+import MapStyleSelector from '../components/map/MapStyleSelector';
+import MapLayersControl from '../components/map/MapLayersControl';
+import MapTiltControl from '../components/map/MapTiltControl';
+import { UserLocationMarker, PendingPinMarker } from '../components/map/MapMarkers';
 
 // 5. Constants and contexts
 import { colors, theme } from '../constants/theme';
@@ -59,15 +64,49 @@ export default function MapViewScreen({ onBack }) {
     longitude: 121.486055,
   };
 
-  const [location, setLocation] = useState(defaultLocation);
-  const [loading, setLoading] = useState(true);
-  const [locationPermission, setLocationPermission] = useState(null);
-  const [userLocation, setUserLocation] = useState(null);
+  // Use location permission hook
+  const {
+    location,
+    loading,
+    locationPermission,
+    userLocation,
+    centerOnUser,
+  } = useLocationPermission(defaultLocation);
+
   const [pendingPin, setPendingPin] = useState(null);
   const [showSightingForm, setShowSightingForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showCoatPatternPicker, setShowCoatPatternPicker] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [sightings, setSightings] = useState([]);
+  const [selectedSighting, setSelectedSighting] = useState(null);
+  const [showSightingDetail, setShowSightingDetail] = useState(false);
+  const [loadingSightings, setLoadingSightings] = useState(false);
+  const [dateFilter, setDateFilter] = useState('all');
+  const [isFilterExpanded, setIsFilterExpanded] = useState(false);
+  const [routeCoordinates, setRouteCoordinates] = useState(null);
+  const [routeDestination, setRouteDestination] = useState(null);
+  const [loadingDirections, setLoadingDirections] = useState(false);
+  const [mapCenter, setMapCenter] = useState(null);
+  const [hasUserCentered, setHasUserCentered] = useState(false);
+  const [mapStyle, setMapStyle] = useState('Street');
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [show3DBuildings, setShow3DBuildings] = useState(false);
+  const [pitch, setPitch] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState(15);
+  const [isLayersExpanded, setIsLayersExpanded] = useState(false);
+  const pitchChangeRef = useRef(false);
+  const stableCenterRef = useRef(null);
+
+  // Disable 3D buildings for Satellite and other styles that don't support it well
+  const is3DBuildingsSupported = mapStyle !== 'Satellite';
+
+  // Auto-disable 3D buildings when switching to unsupported styles
+  useEffect(() => {
+    if (!is3DBuildingsSupported && show3DBuildings) {
+      setShow3DBuildings(false);
+    }
+  }, [mapStyle, is3DBuildingsSupported]);
   const [sightingForm, setSightingForm] = useState({
     catName: '',
     description: '',
@@ -77,116 +116,254 @@ export default function MapViewScreen({ onBack }) {
     photo: null,
   });
 
-  const coatPatterns = [
-    'Solid (One single color)',
-    'Tabby (Stripes, swirls, or "M" on forehead)',
-    'Tuxedo (Black body with white chest/paws)',
-    'Bicolor (Any other color + White)',
-    'Calico (White + Orange + Black patches)',
-    'Tortoiseshell (Black + Orange mottled, no white)',
-    'Colorpoint (Light body, dark ears/tail - like a Siamese)',
-  ];
+  // Use image picker hook
+  const { imageUri: pickedPhotoUri, showImagePickerOptions: showImageOptions, setImageUri: setPhotoUri } = useImagePicker({
+    allowsEditing: true,
+    aspect: [4, 3],
+    quality: 0.8,
+  });
 
-  const primaryColors = [
-    'Black',
-    'White',
-    'Orange Ginger',
-    'Grey Blue',
-    'Cream Buff',
-    'Brown',
-  ];
-
+  // Update photo when image is picked
   useEffect(() => {
-    requestLocationPermission();
-    return () => {
-      // Cleanup if needed
-    };
+    if (pickedPhotoUri) {
+      setSightingForm((prev) => ({ ...prev, photo: pickedPhotoUri }));
+    }
+  }, [pickedPhotoUri]);
+
+  // Center map on user location when it becomes available (only on initial load, once)
+  useEffect(() => {
+    // Prioritize userLocation if available, otherwise use location
+    const targetLocation = userLocation || location;
+    
+    if (targetLocation && !hasUserCentered && targetLocation.latitude !== defaultLocation.latitude) {
+      // Small delay to ensure map is ready
+      const timer = setTimeout(() => {
+        setMapCenter({
+          latitude: targetLocation.latitude,
+          longitude: targetLocation.longitude,
+        });
+        setHasUserCentered(true);
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+    // Only run once when component mounts and location is available
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const requestLocationPermission = async () => {
-    try {
-      setLoading(true);
-      
-      // Check if location services are enabled
-      const servicesEnabled = await Location.hasServicesEnabledAsync();
-      if (!servicesEnabled) {
-        Alert.alert(
-          'Location Services Disabled',
-          'Please enable location services in your device settings to use the map.',
-          [{ text: 'OK' }]
-        );
-        setLocationPermission(false);
-        // Use default location when services are disabled
-        setLocation(defaultLocation);
-        setLoading(false);
-        return;
-      }
+  // Load sightings when map is ready or filter changes
+  useEffect(() => {
+    if (!loading && Mapbox && MAPBOX_ACCESS_TOKEN) {
+      loadSightings();
+    }
+  }, [loading, Mapbox, MAPBOX_ACCESS_TOKEN, dateFilter]);
 
-      // Request location permission
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission Denied',
-          'Location permission is required to show your current location on the map.',
-          [{ text: 'OK' }]
-        );
-        setLocationPermission(false);
-        // Use default location when permission is denied
-        setLocation(defaultLocation);
-        setLoading(false);
-        return;
-      }
-
-      setLocationPermission(true);
-      
-      // Get current location
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-
-      const userLoc = {
-        latitude: currentLocation.coords.latitude,
-        longitude: currentLocation.coords.longitude,
+  // Use mapCenter state if available, otherwise fall back to location
+  const currentMapCenter = mapCenter || location;
+  
+  // Store stable center coordinate - only update when we actually want to move the map
+  useEffect(() => {
+    if (currentMapCenter && !pitchChangeRef.current) {
+      stableCenterRef.current = {
+        latitude: currentMapCenter.latitude,
+        longitude: currentMapCenter.longitude,
       };
+    }
+  }, [currentMapCenter]);
+  
+  // Use stable center when pitch is changing, otherwise use current center
+  const cameraCenter = pitchChangeRef.current && stableCenterRef.current
+    ? stableCenterRef.current
+    : currentMapCenter;
 
-      setUserLocation(userLoc);
-      setLocation(userLoc);
-      setLoading(false);
+  const loadSightings = async () => {
+    setLoadingSightings(true);
+    try {
+      const { data, error } = await getSightings({ dateFilter });
+      if (error) {
+        console.error('Error loading sightings:', error);
+      } else {
+        setSightings(data || []);
+      }
     } catch (error) {
-      console.error('Error getting location:', error);
-      Alert.alert(
-        'Location Error',
-        'Failed to get your current location. Please try again.',
-        [{ text: 'OK' }]
-      );
-      // Use default location when there's an error
-      setLocation(defaultLocation);
-      setLoading(false);
+      console.error('Error loading sightings:', error);
+    } finally {
+      setLoadingSightings(false);
     }
   };
 
-  const handleCenterOnUser = async () => {
-    if (!locationPermission) {
-      await requestLocationPermission();
+  const handleGetDirections = async (sighting, userLoc) => {
+    if (!userLoc || !sighting) {
+      Alert.alert(
+        'Location Unavailable',
+        'Your current location is not available. Please enable location services.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    if (!MAPBOX_ACCESS_TOKEN) {
+      Alert.alert('Error', 'Mapbox access token not configured.');
+      return;
+    }
+
+    setLoadingDirections(true);
+
+    try {
+      // Fetch route from Mapbox Directions API
+      const origin = `${userLoc.longitude},${userLoc.latitude}`;
+      const destination = `${sighting.longitude},${sighting.latitude}`;
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${origin};${destination}?geometries=geojson&access_token=${MAPBOX_ACCESS_TOKEN}`;
+
+      // Add timeout to fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { message: errorText };
+        }
+        console.error('Directions API error:', response.status, errorData);
+        
+        let errorMessage = 'Unable to get directions. ';
+        if (response.status === 401) {
+          errorMessage += 'Invalid API token. Please check your Mapbox configuration.';
+        } else if (response.status === 403) {
+          errorMessage += 'API token does not have permission to access Directions API.';
+        } else if (errorData.message) {
+          errorMessage += errorData.message;
+        } else {
+          errorMessage += 'Please try again.';
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+
+      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        if (route.geometry && route.geometry.coordinates) {
+          const coordinates = route.geometry.coordinates.map(coord => [coord[0], coord[1]]);
+          setRouteCoordinates(coordinates);
+          
+          // Store destination for navigation
+          setRouteDestination({
+            latitude: sighting.latitude,
+            longitude: sighting.longitude,
+          });
+
+          // Close the modal
+          setShowSightingDetail(false);
+          setSelectedSighting(null);
+
+          // Center map on route
+          if (coordinates.length > 0) {
+            const midIndex = Math.floor(coordinates.length / 2);
+            const midCoord = coordinates[midIndex];
+            setMapCenter({
+              latitude: midCoord[1],
+              longitude: midCoord[0],
+            });
+          }
+        } else {
+          console.error('Route geometry not found in response');
+          Alert.alert(
+            'Error',
+            'Route data format is invalid. Please try again.',
+            [{ text: 'OK' }]
+          );
+        }
+      } else {
+        const errorMessage = data.message || 'Unable to get directions. Please try again.';
+        console.error('Directions API returned error:', data.code, errorMessage);
+        Alert.alert(
+          'Error',
+          errorMessage,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching directions:', error);
+      let errorMessage = 'Unable to get directions. ';
+      
+      if (error.name === 'AbortError') {
+        errorMessage += 'Request timed out. Please check your internet connection and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else {
+        errorMessage += 'Please check your internet connection and try again.';
+      }
+      
+      Alert.alert(
+        'Error',
+        errorMessage,
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setLoadingDirections(false);
+    }
+  };
+
+  const handleStartNavigation = async () => {
+    if (!routeDestination || !userLocation) {
+      Alert.alert(
+        'Error',
+        'Unable to start navigation. Location information is missing.',
+        [{ text: 'OK' }]
+      );
       return;
     }
 
     try {
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      const { latitude, longitude } = routeDestination;
+      const { latitude: userLat, longitude: userLon } = userLocation;
 
-      const userLoc = {
-        latitude: currentLocation.coords.latitude,
-        longitude: currentLocation.coords.longitude,
-      };
+      let url;
+      if (Platform.OS === 'ios') {
+        // Apple Maps with turn-by-turn navigation
+        url = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
+      } else {
+        // Google Maps with turn-by-turn navigation
+        url = `google.navigation:q=${latitude},${longitude}`;
+        
+        // Check if Google Maps can handle the URL, otherwise use web URL
+        const canOpen = await Linking.canOpenURL(url);
+        if (!canOpen) {
+          url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=driving&nav=1`;
+        }
+      }
 
-      setLocation(userLoc);
-      setUserLocation(userLoc);
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        // Fallback to web-based directions
+        const fallbackUrl = Platform.OS === 'ios'
+          ? `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`
+          : `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=driving`;
+        await Linking.openURL(fallbackUrl);
+      }
     } catch (error) {
-      console.error('Error centering on user:', error);
-      Alert.alert('Error', 'Failed to get your current location.');
+      console.error('Error starting navigation:', error);
+      Alert.alert(
+        'Error',
+        'Unable to open navigation app. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -198,72 +375,41 @@ export default function MapViewScreen({ onBack }) {
     };
     setPendingPin(coordinates);
     setShowSightingForm(true);
-  };
-
-  const handleTakePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Camera permission is required to take photos.');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: 'images',
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setSightingForm((prev) => ({ ...prev, photo: result.assets[0].uri }));
-      }
-    } catch (error) {
-      console.error('Error taking photo:', error);
-      Alert.alert('Error', 'Failed to take photo.');
-    }
-  };
-
-  const handlePickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Photo library permission is required.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setSightingForm((prev) => ({ ...prev, photo: result.assets[0].uri }));
-      }
-    } catch (error) {
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image.');
+    // Clear route when map is long pressed
+    if (routeCoordinates) {
+      setRouteCoordinates(null);
     }
   };
 
   const handleShowImageOptions = () => {
-    Alert.alert(
-      'Select Photo',
-      'Choose an option',
-      [
-        { text: 'Camera', onPress: handleTakePhoto },
-        { text: 'Gallery', onPress: handlePickImage },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-      { cancelable: true }
-    );
+    showImageOptions();
+  };
+
+  // Calculate distance between two coordinates (Haversine formula)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
   };
 
   const handleSubmitSighting = async () => {
     if (!sightingForm.catName.trim()) {
       Alert.alert('Validation Error', 'Please enter a cat name or nickname.');
+      return;
+    }
+
+    // Description is now required
+    if (!sightingForm.description || !sightingForm.description.trim()) {
+      Alert.alert('Validation Error', 'Please enter a description of the cat.');
       return;
     }
 
@@ -275,6 +421,26 @@ export default function MapViewScreen({ onBack }) {
     if (!pendingPin) {
       Alert.alert('Error', 'Location is required.');
       return;
+    }
+
+    // GPS distance validation (anti-cheat) - prevent pins too far from user's GPS position
+    const MAX_DISTANCE_METERS = 1000; // 1 kilometer maximum distance
+    if (userLocation) {
+      const distance = calculateDistance(
+        userLocation.latitude,
+        userLocation.longitude,
+        pendingPin.latitude,
+        pendingPin.longitude
+      );
+
+      if (distance > MAX_DISTANCE_METERS) {
+        Alert.alert(
+          'Location Too Far',
+          `The pin location is ${Math.round(distance)} meters away from your current location. Please place the pin within ${MAX_DISTANCE_METERS} meters of your current position.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
     }
 
     // Show agreement confirmation dialog
@@ -322,6 +488,9 @@ export default function MapViewScreen({ onBack }) {
                     });
                     setPendingPin(null);
                     setShowSightingForm(false);
+                    setPhotoUri(null);
+                    // Reload sightings to show the new one
+                    loadSightings();
                   },
                 },
               ]);
@@ -442,9 +611,6 @@ export default function MapViewScreen({ onBack }) {
     );
   }
 
-  // Use location state (which defaults to defaultLocation if no permission/user location)
-  const mapCenter = location;
-
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
@@ -462,26 +628,109 @@ export default function MapViewScreen({ onBack }) {
 
       {/* Map */}
       <View style={styles.mapContainer}>
-        {/* Instruction text */}
-        <View style={styles.instructionContainer}>
-          <View style={styles.instructionBox}>
-            <MaterialCommunityIcons name="information" size={16} color={colors.primary} />
-            <Text style={styles.instructionText}>Hold on the map to report a sighting</Text>
+        {/* Map Style Selector */}
+        <MapStyleSelector
+          selectedStyle={mapStyle}
+          onStyleChange={setMapStyle}
+          isLayersExpanded={isLayersExpanded}
+        />
+
+        {/* Map Layers Control */}
+        <MapLayersControl
+          showHeatmap={showHeatmap}
+          onHeatmapToggle={() => setShowHeatmap(!showHeatmap)}
+          show3DBuildings={show3DBuildings}
+          on3DBuildingsToggle={() => {
+            if (is3DBuildingsSupported) {
+              setShow3DBuildings(!show3DBuildings);
+            }
+          }}
+          is3DBuildingsDisabled={!is3DBuildingsSupported}
+          onExpandChange={setIsLayersExpanded}
+        />
+
+        {/* Map Tilt Control */}
+        <MapTiltControl
+          pitch={pitch}
+          onPitchChange={(newPitch) => {
+            pitchChangeRef.current = true;
+            setPitch(newPitch);
+            // Reset flag after a short delay
+            setTimeout(() => {
+              pitchChangeRef.current = false;
+            }, 100);
+          }}
+        />
+
+        {/* Instruction text - Hide when route is displayed */}
+        {!routeCoordinates && (
+          <View style={styles.instructionContainer}>
+            <View style={styles.instructionBox}>
+              <MaterialCommunityIcons name="information" size={16} color={colors.primary} />
+              <Text style={styles.instructionText}>
+                Hold on the map to report a sighting
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
+
+        {/* Navigation and Clear route buttons */}
+        {routeCoordinates && (
+          <>
+            {/* Navigate button */}
+            <TouchableOpacity
+              style={styles.navigateButton}
+              onPress={handleStartNavigation}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="navigation" size={20} color="#ffffff" />
+              <Text style={styles.navigateButtonText}>Navigate</Text>
+            </TouchableOpacity>
+            
+            {/* Clear route button */}
+            <TouchableOpacity
+              style={styles.clearRouteButton}
+              onPress={() => {
+                setRouteCoordinates(null);
+                setRouteDestination(null);
+              }}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="close-circle" size={20} color={colors.error} />
+              <Text style={styles.clearRouteButtonText}>Clear Route</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Filter - Bottom of screen */}
+        <MapFilter
+          selectedFilter={dateFilter}
+          onFilterChange={setDateFilter}
+          onExpandChange={setIsFilterExpanded}
+        />
 
         <Mapbox.MapView
           style={styles.map}
-          styleURL={Mapbox.StyleURL.Street}
+          styleURL={Mapbox.StyleURL[mapStyle] || Mapbox.StyleURL.Street}
           logoEnabled={false}
           attributionEnabled={false}
           onLongPress={handleMapLongPress}
+          onMapIdle={(state) => {
+            // Update zoom level when user manually zooms to preserve it
+            if (state.properties.zoomLevel && Math.abs(state.properties.zoomLevel - zoomLevel) > 0.1) {
+              setZoomLevel(state.properties.zoomLevel);
+            }
+          }}
         >
           <Mapbox.Camera
-            zoomLevel={15}
-            centerCoordinate={[mapCenter.longitude, mapCenter.latitude]}
-            animationMode="flyTo"
-            animationDuration={2000}
+            key={`camera-${stableCenterRef.current ? stableCenterRef.current.latitude.toFixed(6) : cameraCenter.latitude.toFixed(6)}-${stableCenterRef.current ? stableCenterRef.current.longitude.toFixed(6) : cameraCenter.longitude.toFixed(6)}`}
+            zoomLevel={zoomLevel}
+            centerCoordinate={pitchChangeRef.current && stableCenterRef.current 
+              ? [stableCenterRef.current.longitude, stableCenterRef.current.latitude]
+              : [cameraCenter.longitude, cameraCenter.latitude]}
+            pitch={pitch}
+            animationMode={pitchChangeRef.current ? "none" : "flyTo"}
+            animationDuration={pitchChangeRef.current ? 0 : 1500}
           />
 
           {/* User location - Use Mapbox built-in component when permission is granted */}
@@ -497,10 +746,7 @@ export default function MapViewScreen({ onBack }) {
                 id="userLocation"
                 coordinate={[userLocation.longitude, userLocation.latitude]}
               >
-                <View style={styles.userLocationMarker}>
-                  <View style={styles.userLocationPulse} />
-                  <View style={styles.userLocationDot} />
-                </View>
+                <UserLocationMarker />
               </Mapbox.PointAnnotation>
             )
           )}
@@ -511,19 +757,182 @@ export default function MapViewScreen({ onBack }) {
               id="pendingPin"
               coordinate={[pendingPin.longitude, pendingPin.latitude]}
             >
-              <View style={styles.pendingPinMarker}>
-                <MaterialCommunityIcons name="cat" size={32} color={colors.primary} />
-                <View style={styles.pendingPinPulse} />
-              </View>
+              <PendingPinMarker />
             </Mapbox.PointAnnotation>
+          )}
+
+          {/* Saved sightings markers */}
+          {sightings.map((sighting) => (
+            <Mapbox.PointAnnotation
+              key={sighting.id}
+              id={`sighting-${sighting.id}`}
+              coordinate={[sighting.longitude, sighting.latitude]}
+              onSelected={() => {
+                setSelectedSighting(sighting);
+                setShowSightingDetail(true);
+              }}
+            >
+              <SightingMarker urgencyLevel={sighting.urgency_level} />
+            </Mapbox.PointAnnotation>
+          ))}
+
+          {/* Route line */}
+          {routeCoordinates && routeCoordinates.length > 0 && (
+            <Mapbox.ShapeSource
+              id="routeSource"
+              shape={{
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: routeCoordinates,
+                },
+              }}
+            >
+              <Mapbox.LineLayer
+                id="routeLayer"
+                style={{
+                  lineColor: colors.primary,
+                  lineWidth: 4,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+            </Mapbox.ShapeSource>
+          )}
+
+          {/* Heatmap Layer */}
+          {showHeatmap && sightings.length > 0 && (
+            <Mapbox.ShapeSource
+              id="heatmapSource"
+              shape={{
+                type: 'FeatureCollection',
+                features: sightings.map((sighting) => ({
+                  type: 'Feature',
+                  geometry: {
+                    type: 'Point',
+                    coordinates: [sighting.longitude, sighting.latitude],
+                  },
+                  properties: {
+                    weight: 1,
+                  },
+                })),
+              }}
+            >
+              <Mapbox.HeatmapLayer
+                id="heatmapLayer"
+                style={{
+                  heatmapColor: [
+                    'interpolate',
+                    ['linear'],
+                    ['heatmap-density'],
+                    0,
+                    'rgba(0, 0, 255, 0)',
+                    0.1,
+                    'rgba(0, 255, 255, 0.3)',
+                    0.5,
+                    'rgba(0, 255, 0, 0.5)',
+                    0.7,
+                    'rgba(255, 255, 0, 0.7)',
+                    1,
+                    'rgba(255, 0, 0, 1)',
+                  ],
+                  heatmapWeight: [
+                    'interpolate',
+                    ['linear'],
+                    ['get', 'weight'],
+                    0,
+                    0,
+                    1,
+                    1,
+                  ],
+                  heatmapIntensity: [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    0,
+                    1,
+                    9,
+                    3,
+                  ],
+                  heatmapRadius: [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    0,
+                    2,
+                    9,
+                    20,
+                  ],
+                  heatmapOpacity: 0.6,
+                }}
+              />
+            </Mapbox.ShapeSource>
+          )}
+
+          {/* 3D Buildings Layer - Only show if supported by current map style */}
+          {show3DBuildings && is3DBuildingsSupported && (
+            <Mapbox.VectorSource id="composite" url="mapbox://mapbox.mapbox-streets-v8">
+              <Mapbox.FillExtrusionLayer
+                id="3d-buildings"
+                sourceLayerID="building"
+                style={{
+                  fillExtrusionColor: '#aaa',
+                  fillExtrusionOpacity: 0.6,
+                  fillExtrusionHeight: [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    15,
+                    0,
+                    15.05,
+                    ['get', 'height'],
+                  ],
+                  fillExtrusionBase: [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    15,
+                    0,
+                    15.05,
+                    ['get', 'min_height'],
+                  ],
+                }}
+              />
+            </Mapbox.VectorSource>
           )}
         </Mapbox.MapView>
 
         {/* Center on user button */}
         {locationPermission && (
           <TouchableOpacity
-            style={styles.centerButton}
-            onPress={handleCenterOnUser}
+            style={[
+              styles.centerButton,
+              isFilterExpanded && styles.centerButtonExpanded,
+            ]}
+            onPress={async () => {
+              try {
+                // Get current location directly
+                const currentLocation = await Location.getCurrentPositionAsync({
+                  accuracy: Location.Accuracy.High,
+                });
+                
+                const newLocation = {
+                  latitude: currentLocation.coords.latitude,
+                  longitude: currentLocation.coords.longitude,
+                };
+                
+                // Update map center immediately
+                setMapCenter(newLocation);
+                setHasUserCentered(true);
+                
+                // Also call the hook's centerOnUser to update location state
+                centerOnUser();
+              } catch (error) {
+                console.error('Error centering on user:', error);
+                Alert.alert('Error', 'Failed to get your current location.');
+              }
+            }}
             activeOpacity={0.8}
           >
             <FontAwesome name="location-arrow" size={20} color={colors.primary} />
@@ -532,301 +941,36 @@ export default function MapViewScreen({ onBack }) {
       </View>
 
       {/* Sighting Form Modal */}
-      <Modal
+      <SightingFormModal
         visible={showSightingForm}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={handleCancelSighting}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalContainer}
-        >
-          <View style={styles.modalBackdrop} />
-          <View style={[styles.modalContent, submitting && styles.modalContentDisabled]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Report Cat Sighting</Text>
-              <TouchableOpacity onPress={handleCancelSighting}>
-                <FontAwesome name="times" size={20} color={colors.textDark} />
-              </TouchableOpacity>
-            </View>
+        sightingForm={sightingForm}
+        onFormChange={setSightingForm}
+        submitting={submitting}
+        showCoatPatternPicker={showCoatPatternPicker}
+        showColorPicker={showColorPicker}
+        onShowCoatPatternPicker={() => setShowCoatPatternPicker(!showCoatPatternPicker)}
+        onShowColorPicker={() => setShowColorPicker(!showColorPicker)}
+        onShowImageOptions={handleShowImageOptions}
+        onRemovePhoto={() => {
+          setSightingForm((prev) => ({ ...prev, photo: null }));
+          setPhotoUri(null);
+        }}
+        onSubmit={handleSubmitSighting}
+        onCancel={handleCancelSighting}
+      />
 
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              {/* Cat Name */}
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Cat Name / Nickname *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., The Grocery Store Tabby"
-                  placeholderTextColor={colors.text}
-                  value={sightingForm.catName}
-                  onChangeText={(text) => setSightingForm((prev) => ({ ...prev, catName: text }))}
-                />
-              </View>
-
-              {/* Description */}
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Description</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  placeholder="e.g., Very shy, orange, wearing a blue collar"
-                  placeholderTextColor={colors.text}
-                  value={sightingForm.description}
-                  onChangeText={(text) => setSightingForm((prev) => ({ ...prev, description: text }))}
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                />
-              </View>
-
-              {/* Coat Pattern */}
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Coat Pattern (Recommended)</Text>
-                <TouchableOpacity
-                  style={styles.dropdown}
-                  onPress={() => setShowCoatPatternPicker(true)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.dropdownText, !sightingForm.coatPattern && styles.dropdownPlaceholder]}>
-                    {sightingForm.coatPattern ? sightingForm.coatPattern.split(' (')[0] : 'Select coat pattern'}
-                  </Text>
-                  <MaterialCommunityIcons name="chevron-down" size={20} color={colors.text} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Primary Color */}
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Primary Color</Text>
-                <TouchableOpacity
-                  style={styles.dropdown}
-                  onPress={() => setShowColorPicker(true)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.dropdownText, !sightingForm.primaryColor && styles.dropdownPlaceholder]}>
-                    {sightingForm.primaryColor || 'Select primary color'}
-                  </Text>
-                  <MaterialCommunityIcons name="chevron-down" size={20} color={colors.text} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Urgency Level */}
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Urgency Level</Text>
-                <View style={styles.urgencyButtons}>
-                  {[
-                    { level: 'Just chilling', icon: 'emoticon-happy', color: colors.success },
-                    { level: 'Needs food', icon: 'food', color: colors.warning },
-                    { level: 'Appears injured', icon: 'alert-circle', color: colors.error },
-                  ].map(({ level, icon, color }) => {
-                    const isActive = sightingForm.urgencyLevel === level;
-                    return (
-                      <TouchableOpacity
-                        key={level}
-                        style={[
-                          styles.urgencyButton,
-                          isActive && { borderColor: color },
-                        ]}
-                        onPress={() => setSightingForm((prev) => ({ ...prev, urgencyLevel: level }))}
-                        activeOpacity={0.7}
-                      >
-                        <MaterialCommunityIcons
-                          name={icon}
-                          size={20}
-                          color={isActive ? color : colors.text}
-                        />
-                        <Text
-                          style={[
-                            styles.urgencyButtonText,
-                            isActive && { color: color },
-                          ]}
-                        >
-                          {level}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* Photo Upload */}
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Photo</Text>
-                <TouchableOpacity
-                  style={styles.photoButton}
-                  onPress={handleShowImageOptions}
-                  activeOpacity={0.7}
-                >
-                  {sightingForm.photo ? (
-                    <Image source={{ uri: sightingForm.photo }} style={styles.photoPreview} />
-                  ) : (
-                    <View style={styles.photoPlaceholder}>
-                      <MaterialCommunityIcons name="camera" size={32} color={colors.primary} />
-                      <Text style={styles.photoPlaceholderText}>Take Photo or Choose from Gallery</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-                {sightingForm.photo && (
-                  <TouchableOpacity
-                    style={styles.removePhotoButton}
-                    onPress={() => setSightingForm((prev) => ({ ...prev, photo: null }))}
-                  >
-                    <Text style={styles.removePhotoText}>Remove Photo</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </ScrollView>
-
-            {/* Modal Footer */}
-            <View style={styles.modalFooter}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={handleCancelSighting}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-                onPress={handleSubmitSighting}
-                activeOpacity={0.7}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Submit Sighting</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-        
-      </Modal>
-
-      {/* Coat Pattern Picker Modal */}
-      <Modal
-        visible={showCoatPatternPicker}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowCoatPatternPicker(false)}
-      >
-        <TouchableOpacity
-          style={styles.pickerModalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowCoatPatternPicker(false)}
-        >
-          <View style={styles.pickerModalContent}>
-            <View style={styles.pickerModalHeader}>
-              <Text style={styles.pickerModalTitle}>Select Coat Pattern</Text>
-              <TouchableOpacity onPress={() => setShowCoatPatternPicker(false)}>
-                <MaterialCommunityIcons name="close" size={24} color={colors.textDark} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.pickerModalList}>
-              {/* Clear option */}
-              <TouchableOpacity
-                style={[styles.pickerItem, !sightingForm.coatPattern && styles.pickerItemSelected]}
-                onPress={() => {
-                  setSightingForm((prev) => ({ ...prev, coatPattern: '' }));
-                  setShowCoatPatternPicker(false);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.pickerItemText, !sightingForm.coatPattern && styles.pickerItemTextSelected]}>
-                  Clear Selection
-                </Text>
-                {!sightingForm.coatPattern && (
-                  <MaterialCommunityIcons name="check" size={20} color={colors.primary} />
-                )}
-              </TouchableOpacity>
-              {coatPatterns.map((pattern) => {
-                const patternName = pattern.split(' (')[0];
-                const isSelected = sightingForm.coatPattern === pattern;
-                return (
-                  <TouchableOpacity
-                    key={pattern}
-                    style={[styles.pickerItem, isSelected && styles.pickerItemSelected]}
-                    onPress={() => {
-                      setSightingForm((prev) => ({ ...prev, coatPattern: pattern }));
-                      setShowCoatPatternPicker(false);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.pickerItemText, isSelected && styles.pickerItemTextSelected]}>
-                      {patternName}
-                    </Text>
-                    {isSelected && (
-                      <MaterialCommunityIcons name="check" size={20} color={colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Primary Color Picker Modal */}
-      <Modal
-        visible={showColorPicker}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowColorPicker(false)}
-      >
-        <TouchableOpacity
-          style={styles.pickerModalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowColorPicker(false)}
-        >
-          <View style={styles.pickerModalContent}>
-            <View style={styles.pickerModalHeader}>
-              <Text style={styles.pickerModalTitle}>Select Primary Color</Text>
-              <TouchableOpacity onPress={() => setShowColorPicker(false)}>
-                <MaterialCommunityIcons name="close" size={24} color={colors.textDark} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.pickerModalList}>
-              {/* Clear option */}
-              <TouchableOpacity
-                style={[styles.pickerItem, !sightingForm.primaryColor && styles.pickerItemSelected]}
-                onPress={() => {
-                  setSightingForm((prev) => ({ ...prev, primaryColor: '' }));
-                  setShowColorPicker(false);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.pickerItemText, !sightingForm.primaryColor && styles.pickerItemTextSelected]}>
-                  Clear Selection
-                </Text>
-                {!sightingForm.primaryColor && (
-                  <MaterialCommunityIcons name="check" size={20} color={colors.primary} />
-                )}
-              </TouchableOpacity>
-              {primaryColors.map((color) => {
-                const isSelected = sightingForm.primaryColor === color;
-                return (
-                  <TouchableOpacity
-                    key={color}
-                    style={[styles.pickerItem, isSelected && styles.pickerItemSelected]}
-                    onPress={() => {
-                      setSightingForm((prev) => ({ ...prev, primaryColor: color }));
-                      setShowColorPicker(false);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.pickerItemText, isSelected && styles.pickerItemTextSelected]}>
-                      {color}
-                    </Text>
-                    {isSelected && (
-                      <MaterialCommunityIcons name="check" size={20} color={colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {/* Sighting Detail Modal */}
+      <SightingDetailModal
+        visible={showSightingDetail}
+        sighting={selectedSighting}
+        onClose={() => {
+          setShowSightingDetail(false);
+          setSelectedSighting(null);
+        }}
+        userLocation={userLocation}
+        onGetDirections={handleGetDirections}
+        loadingDirections={loadingDirections}
+      />
       
       {/* Separate Modal for Loading Overlay to ensure it's on top */}
       <Modal
@@ -894,7 +1038,7 @@ const styles = StyleSheet.create({
   },
   instructionContainer: {
     position: 'absolute',
-    top: theme.spacing.md,
+    top: theme.spacing.xxl,
     left: theme.spacing.md,
     right: theme.spacing.md,
     zIndex: 1,
@@ -916,6 +1060,58 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     gap: theme.spacing.xs,
+  },
+  navigateButton: {
+    position: 'absolute',
+    top: 60,
+    left: theme.spacing.md,
+    right: theme.spacing.md,
+    zIndex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+    backgroundColor: colors.primary,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  navigateButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  clearRouteButton: {
+    position: 'absolute',
+    top: 100,
+    left: theme.spacing.md,
+    right: theme.spacing.md,
+    zIndex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+    backgroundColor: colors.surface,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.error,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  clearRouteButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.error,
   },
   instructionText: {
     fontSize: 14,
@@ -971,7 +1167,7 @@ const styles = StyleSheet.create({
   centerButton: {
     position: 'absolute',
     bottom: theme.spacing.lg,
-    right: theme.spacing.lg,
+    right: theme.spacing.md,
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -985,63 +1181,10 @@ const styles = StyleSheet.create({
     elevation: 4,
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: theme.spacing.xxl,
   },
-  userLocationMarker: {
-    width: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userLocationPulse: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    opacity: 0.3,
-  },
-  userLocationDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.primary,
-    borderWidth: 2,
-    borderColor: '#ffffff',
-  },
-  pendingPinMarker: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  pendingPinPulse: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-    opacity: 0.3,
-  },
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalContent: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: theme.borderRadius.xl,
-    borderTopRightRadius: theme.borderRadius.xl,
-    maxHeight: '90%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  modalContentDisabled: {
-    opacity: 0.6,
+  centerButtonExpanded: {
+    marginBottom: theme.spacing.xxxxxxl,
   },
   loadingOverlay: {
     flex: 1,
@@ -1067,212 +1210,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.textDark,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textDark,
-  },
-  modalBody: {
-    padding: theme.spacing.md,
-    maxHeight: 500,
-  },
-  formGroup: {
-    marginBottom: theme.spacing.lg,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textDark,
-    marginBottom: theme.spacing.xs,
-  },
-  input: {
-    backgroundColor: colors.cream,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.md,
-    fontSize: 16,
-    color: colors.textDark,
-  },
-  textArea: {
-    minHeight: 100,
-    paddingTop: theme.spacing.md,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.cream,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.md,
-  },
-  dropdownText: {
-    flex: 1,
-    fontSize: 16,
-    color: colors.textDark,
-  },
-  dropdownPlaceholder: {
-    color: colors.text,
-  },
-  urgencyButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.spacing.sm,
-  },
-  urgencyButton: {
-    flex: 1,
-    minWidth: '30%',
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: colors.cream,
-    borderWidth: 2,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.xs,
-  },
-  urgencyButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textDark,
-    textAlign: 'center',
-  },
-  photoButton: {
-    width: '100%',
-    height: 200,
-    borderRadius: theme.borderRadius.md,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.cream,
-  },
-  photoPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: theme.spacing.lg,
-  },
-  photoPlaceholderText: {
-    marginTop: theme.spacing.sm,
-    fontSize: 14,
-    color: colors.text,
-    textAlign: 'center',
-  },
-  photoPreview: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  removePhotoButton: {
-    marginTop: theme.spacing.sm,
-    alignSelf: 'flex-start',
-  },
-  removePhotoText: {
-    fontSize: 14,
-    color: colors.error,
-    fontWeight: '600',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    padding: theme.spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    gap: theme.spacing.md,
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: colors.cream,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textDark,
-  },
-  submitButton: {
-    flex: 1,
-    paddingVertical: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-  },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  pickerModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  pickerModalContent: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: theme.borderRadius.xl,
-    borderTopRightRadius: theme.borderRadius.xl,
-    maxHeight: '70%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  pickerModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  pickerModalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textDark,
-  },
-  pickerModalList: {
-    maxHeight: 400,
-  },
-  pickerItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    minHeight: 48,
-  },
-  pickerItemSelected: {
-    backgroundColor: colors.background,
-  },
-  pickerItemText: {
-    fontSize: 16,
-    color: colors.textDark,
-    flex: 1,
-    flexShrink: 1,
-  },
-  pickerItemTextSelected: {
-    color: colors.primary,
-    fontWeight: '600',
   },
 });
 
