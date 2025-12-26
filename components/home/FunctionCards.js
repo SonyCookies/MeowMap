@@ -14,14 +14,17 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 // 5. Constants and contexts
 import { colors, theme } from '../../constants/theme';
 
-export default function FunctionCards({ onMapViewPress }) {
+export default function FunctionCards({ onMapViewPress, onMySightingsPress }) {
   return (
     <View style={styles.cardsContainerWrapper}>
       <Text style={styles.sectionTitle}>What would you like to do?</Text>
       <View style={styles.cardsContainer}>
         {/* Row 1 */}
         <View style={styles.cardsRow}>
-          <TouchableOpacity style={styles.functionCard}>
+          <TouchableOpacity 
+            style={styles.functionCard}
+            onPress={onMySightingsPress}
+          >
             <View style={styles.functionCardIcon}>
               <MaterialCommunityIcons name="cat" size={32} color={colors.primary} />
             </View>

@@ -11,6 +11,10 @@ import {
   Alert,
   Modal,
   Linking,
+  ScrollView,
+  Image,
+  TextInput,
+  KeyboardAvoidingView,
 } from 'react-native';
 import * as Location from 'expo-location';
 
@@ -37,6 +41,7 @@ if (Platform.OS !== 'web') {
 
 // 3. Local utilities and hooks
 import { createSighting, getSightings } from '../services/sightingService';
+import { addSightingPhoto } from '../services/photoService';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocationPermission } from '../hooks/useLocationPermission';
 import { useImagePicker } from '../hooks/useImagePicker';
@@ -54,7 +59,7 @@ import { UserLocationMarker, PendingPinMarker } from '../components/map/MapMarke
 // 5. Constants and contexts
 import { colors, theme } from '../constants/theme';
 
-export default function MapViewScreen({ onBack }) {
+export default function MapViewScreen({ onBack, initialCenter = null }) {
   // Get user from auth context
   const { user } = useAuth();
   
@@ -116,8 +121,19 @@ export default function MapViewScreen({ onBack }) {
     photo: null,
   });
 
-  // Use image picker hook
+  const [showAddPhotoModal, setShowAddPhotoModal] = useState(false);
+  const [addingPhoto, setAddingPhoto] = useState(false);
+  const [photoCaption, setPhotoCaption] = useState('');
+
+  // Use image picker hook for new sightings
   const { imageUri: pickedPhotoUri, showImagePickerOptions: showImageOptions, setImageUri: setPhotoUri } = useImagePicker({
+    allowsEditing: true,
+    aspect: [4, 3],
+    quality: 0.8,
+  });
+
+  // Use image picker hook for adding photos to existing sightings
+  const { imageUri: pickedAddPhotoUri, showImagePickerOptions: showAddPhotoOptions, setImageUri: setAddPhotoUri } = useImagePicker({
     allowsEditing: true,
     aspect: [4, 3],
     quality: 0.8,
@@ -130,26 +146,39 @@ export default function MapViewScreen({ onBack }) {
     }
   }, [pickedPhotoUri]);
 
-  // Center map on user location when it becomes available (only on initial load, once)
+  // Center map on initialCenter if provided, otherwise center on user location when it becomes available (only on initial load, once)
   useEffect(() => {
-    // Prioritize userLocation if available, otherwise use location
-    const targetLocation = userLocation || location;
-    
-    if (targetLocation && !hasUserCentered && targetLocation.latitude !== defaultLocation.latitude) {
+    if (initialCenter) {
       // Small delay to ensure map is ready
       const timer = setTimeout(() => {
         setMapCenter({
-          latitude: targetLocation.latitude,
-          longitude: targetLocation.longitude,
+          latitude: initialCenter.latitude,
+          longitude: initialCenter.longitude,
         });
         setHasUserCentered(true);
       }, 300);
       
       return () => clearTimeout(timer);
+    } else {
+      // Prioritize userLocation if available, otherwise use location
+      const targetLocation = userLocation || location;
+      
+      if (targetLocation && !hasUserCentered && targetLocation.latitude !== defaultLocation.latitude) {
+        // Small delay to ensure map is ready
+        const timer = setTimeout(() => {
+          setMapCenter({
+            latitude: targetLocation.latitude,
+            longitude: targetLocation.longitude,
+          });
+          setHasUserCentered(true);
+        }, 300);
+        
+        return () => clearTimeout(timer);
+      }
     }
-    // Only run once when component mounts and location is available
+    // Only run once when component mounts and location is available, or when initialCenter changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialCenter]);
 
   // Load sightings when map is ready or filter changes
   useEffect(() => {
@@ -194,18 +223,18 @@ export default function MapViewScreen({ onBack }) {
 
   const handleGetDirections = async (sighting, userLoc) => {
     if (!userLoc || !sighting) {
-      Alert.alert(
+        Alert.alert(
         'Location Unavailable',
         'Your current location is not available. Please enable location services.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
+          [{ text: 'OK' }]
+        );
+        return;
+      }
 
     if (!MAPBOX_ACCESS_TOKEN) {
       Alert.alert('Error', 'Mapbox access token not configured.');
-      return;
-    }
+        return;
+      }
 
     setLoadingDirections(true);
 
@@ -214,7 +243,7 @@ export default function MapViewScreen({ onBack }) {
       const origin = `${userLoc.longitude},${userLoc.latitude}`;
       const destination = `${sighting.longitude},${sighting.latitude}`;
       const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${origin};${destination}?geometries=geojson&access_token=${MAPBOX_ACCESS_TOKEN}`;
-
+      
       // Add timeout to fetch request
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -535,6 +564,46 @@ export default function MapViewScreen({ onBack }) {
     );
   };
 
+  const handleAddPhoto = async () => {
+    if (!user?.id || !selectedSighting) {
+      Alert.alert('Error', 'You must be logged in to add photos.');
+      return;
+    }
+
+    if (!pickedAddPhotoUri) {
+      showAddPhotoOptions();
+      return;
+    }
+
+    setAddingPhoto(true);
+    try {
+      const { data, error } = await addSightingPhoto(
+        selectedSighting.id,
+        user.id,
+        pickedAddPhotoUri,
+        photoCaption
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      Alert.alert('Success', 'Photo added successfully!');
+      setShowAddPhotoModal(false);
+      setPhotoCaption('');
+      setAddPhotoUri(null);
+      setSelectedSighting(null);
+      
+      // Refresh sightings to show updated photo count
+      loadSightings();
+    } catch (error) {
+      console.error('Error adding photo:', error);
+      Alert.alert('Error', error.message || 'Failed to add photo. Please try again.');
+    } finally {
+      setAddingPhoto(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -664,14 +733,14 @@ export default function MapViewScreen({ onBack }) {
 
         {/* Instruction text - Hide when route is displayed */}
         {!routeCoordinates && (
-          <View style={styles.instructionContainer}>
-            <View style={styles.instructionBox}>
-              <MaterialCommunityIcons name="information" size={16} color={colors.primary} />
+        <View style={styles.instructionContainer}>
+          <View style={styles.instructionBox}>
+            <MaterialCommunityIcons name="information" size={16} color={colors.primary} />
               <Text style={styles.instructionText}>
                 Hold on the map to report a sighting
               </Text>
-            </View>
           </View>
+        </View>
         )}
 
         {/* Navigation and Clear route buttons */}
@@ -768,10 +837,33 @@ export default function MapViewScreen({ onBack }) {
               id={`sighting-${sighting.id}`}
               coordinate={[sighting.longitude, sighting.latitude]}
               onSelected={() => {
-                setSelectedSighting(sighting);
-                setShowSightingDetail(true);
+                // Show action sheet: View Details or Add Photo
+                Alert.alert(
+                  sighting.cat_name || 'Cat Sighting',
+                  'What would you like to do?',
+                  [
+                    {
+                      text: 'View Details',
+                      onPress: () => {
+                        setSelectedSighting(sighting);
+                        setShowSightingDetail(true);
+                      },
+                    },
+                    {
+                      text: 'Add Photo',
+                      onPress: () => {
+                        setSelectedSighting(sighting);
+                        setShowAddPhotoModal(true);
+                        setPhotoCaption('');
+                        setAddPhotoUri(null);
+                      },
+                    },
+                    { text: 'Cancel', style: 'cancel' },
+                  ],
+                  { cancelable: true }
+                );
               }}
-            >
+        >
               <SightingMarker urgencyLevel={sighting.urgency_level} />
             </Mapbox.PointAnnotation>
           ))}
@@ -905,11 +997,11 @@ export default function MapViewScreen({ onBack }) {
 
         {/* Center on user button */}
         {locationPermission && (
-          <TouchableOpacity
-            style={[
+                <TouchableOpacity
+                        style={[
               styles.centerButton,
               isFilterExpanded && styles.centerButtonExpanded,
-            ]}
+                        ]}
             onPress={async () => {
               try {
                 // Get current location directly
@@ -934,11 +1026,11 @@ export default function MapViewScreen({ onBack }) {
               }
             }}
             activeOpacity={0.8}
-          >
+              >
             <FontAwesome name="location-arrow" size={20} color={colors.primary} />
-          </TouchableOpacity>
-        )}
-      </View>
+              </TouchableOpacity>
+                )}
+            </View>
 
       {/* Sighting Form Modal */}
       <SightingFormModal
@@ -971,6 +1063,110 @@ export default function MapViewScreen({ onBack }) {
         onGetDirections={handleGetDirections}
         loadingDirections={loadingDirections}
       />
+
+      {/* Add Photo Modal */}
+      <Modal
+        visible={showAddPhotoModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowAddPhotoModal(false);
+          setAddPhotoUri(null);
+          setPhotoCaption('');
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.addPhotoModalContainer}
+      >
+          <View style={styles.addPhotoModalContent}>
+            <View style={styles.addPhotoModalHeader}>
+              <Text style={styles.addPhotoModalTitle}>
+                Add Photo to {selectedSighting?.cat_name || 'Sighting'}
+              </Text>
+        <TouchableOpacity
+                onPress={() => {
+                  setShowAddPhotoModal(false);
+                  setAddPhotoUri(null);
+                  setPhotoCaption('');
+                }}
+              >
+                <MaterialCommunityIcons name="close" size={24} color={colors.textDark} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.addPhotoModalBody} showsVerticalScrollIndicator={false}>
+              {!pickedAddPhotoUri ? (
+              <TouchableOpacity
+                  style={styles.pickPhotoButton}
+                  onPress={showAddPhotoOptions}
+                  disabled={addingPhoto}
+                >
+                  <MaterialCommunityIcons name="camera" size={48} color={colors.primary} />
+                  <Text style={styles.pickPhotoText}>Choose Photo</Text>
+              </TouchableOpacity>
+              ) : (
+                <>
+                  <Image
+                    source={{ uri: pickedAddPhotoUri }}
+                    style={styles.addPhotoPreview}
+                    resizeMode="cover"
+                  />
+                  <TextInput
+                    style={styles.addPhotoCaption}
+                    value={photoCaption}
+                    onChangeText={setPhotoCaption}
+                    placeholder="Add a caption (optional)..."
+                    placeholderTextColor={colors.textLight}
+                    multiline
+                    maxLength={200}
+                  />
+                  <TouchableOpacity
+                    style={styles.changePhotoButton}
+                    onPress={() => {
+                      setAddPhotoUri(null);
+                      showAddPhotoOptions();
+                    }}
+                  >
+                    <MaterialCommunityIcons name="image-edit" size={20} color={colors.primary} />
+                    <Text style={styles.changePhotoText}>Change Photo</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </ScrollView>
+
+            <View style={styles.addPhotoModalFooter}>
+        <TouchableOpacity
+                style={styles.addPhotoCancelButton}
+                onPress={() => {
+                  setShowAddPhotoModal(false);
+                  setAddPhotoUri(null);
+                  setPhotoCaption('');
+                }}
+                disabled={addingPhoto}
+              >
+                <Text style={styles.addPhotoCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              {pickedAddPhotoUri && (
+                  <TouchableOpacity
+                  style={[styles.addPhotoSubmitButton, addingPhoto && styles.addPhotoSubmitDisabled]}
+                  onPress={handleAddPhoto}
+                  disabled={addingPhoto}
+                >
+                  {addingPhoto ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons name="check" size={20} color="#ffffff" />
+                      <Text style={styles.addPhotoSubmitText}>Add Photo</Text>
+                    </>
+                    )}
+                  </TouchableOpacity>
+              )}
+          </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
       
       {/* Separate Modal for Loading Overlay to ensure it's on top */}
       <Modal
@@ -1210,6 +1406,112 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.textDark,
+  },
+  addPhotoModalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  addPhotoModalContent: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: theme.borderRadius.lg,
+    borderTopRightRadius: theme.borderRadius.lg,
+    maxHeight: '90%',
+  },
+  addPhotoModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  addPhotoModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textDark,
+  },
+  addPhotoModalBody: {
+    padding: theme.spacing.md,
+  },
+  pickPhotoButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: theme.spacing.xxxl,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    borderRadius: theme.borderRadius.md,
+  },
+  pickPhotoText: {
+    marginTop: theme.spacing.md,
+    fontSize: 16,
+    color: colors.text,
+  },
+  addPhotoPreview: {
+    width: '100%',
+    height: 300,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.md,
+  },
+  addPhotoCaption: {
+    backgroundColor: colors.cream,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    fontSize: 14,
+    color: colors.textDark,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    marginBottom: theme.spacing.md,
+  },
+  changePhotoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    alignSelf: 'flex-start',
+    padding: theme.spacing.sm,
+  },
+  changePhotoText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  addPhotoModalFooter: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    padding: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  addPhotoCancelButton: {
+    flex: 1,
+    padding: theme.spacing.md,
+    backgroundColor: colors.cream,
+    borderRadius: theme.borderRadius.md,
+    alignItems: 'center',
+  },
+  addPhotoCancelText: {
+    fontSize: 16,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  addPhotoSubmitButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+    padding: theme.spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: theme.borderRadius.md,
+  },
+  addPhotoSubmitDisabled: {
+    opacity: 0.5,
+  },
+  addPhotoSubmitText: {
+    fontSize: 16,
+    color: '#ffffff',
+    fontWeight: '600',
   },
 });
 

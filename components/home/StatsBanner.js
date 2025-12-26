@@ -14,7 +14,7 @@ import FunctionCards from './FunctionCards';
 // 5. Constants and contexts
 import { colors, theme } from '../../constants/theme';
 
-export default function StatsBanner({ stats, onMapViewPress }) {
+export default function StatsBanner({ stats, onMapViewPress, onMySightingsPress }) {
   return (
     <View style={styles.statsBannerContainer}>
       {/* Background Image - Flipped Horizontally */}
@@ -47,7 +47,7 @@ export default function StatsBanner({ stats, onMapViewPress }) {
       </View>
 
       {/* Functionality Cards Container - Inside Stats Banner */}
-      <FunctionCards onMapViewPress={onMapViewPress} />
+      <FunctionCards onMapViewPress={onMapViewPress} onMySightingsPress={onMySightingsPress} />
     </View>
   );
 }

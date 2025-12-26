@@ -10,6 +10,7 @@ import {
   ImageBackground,
   StatusBar,
   Platform,
+  Alert,
 } from 'react-native';
 
 // 2. Third-party libraries
@@ -17,6 +18,7 @@ import { FontAwesome } from '@expo/vector-icons';
 
 // 3. Local utilities and hooks
 import { getProfile } from '../services/profileService';
+import { getUserSightingsCount } from '../services/sightingService';
 
 // 4. Local components
 import NotificationDrawer from '../components/home/NotificationDrawer';
@@ -27,6 +29,7 @@ import ProfileScreen from './ProfileScreen';
 import UpdateDetailScreen from './UpdateDetailScreen';
 import MapViewScreen from './MapViewScreen';
 import UpdatesListScreen from './UpdatesListScreen';
+import MySightingsScreen from './MySightingsScreen';
 
 // 5. Constants and contexts
 import { colors, theme } from '../constants/theme';
@@ -35,14 +38,17 @@ import { useNotifications } from '../contexts/NotificationContext';
 
 export default function HomeScreen() {
   const { user, signOut } = useAuth();
-  const { notifications, markAllAsRead, markAsRead } = useNotifications();
+  const { notifications, markAllAsRead, markAsRead, removeNotification, refreshNotifications } = useNotifications();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sightingsCount, setSightingsCount] = useState(0);
   const [notificationDrawerVisible, setNotificationDrawerVisible] = useState(false);
   const [menuDrawerVisible, setMenuDrawerVisible] = useState(false);
   const [showProfileScreen, setShowProfileScreen] = useState(false);
   const [showMapViewScreen, setShowMapViewScreen] = useState(false);
   const [showUpdatesListScreen, setShowUpdatesListScreen] = useState(false);
+  const [showMySightingsScreen, setShowMySightingsScreen] = useState(false);
+  const [mapViewInitialCenter, setMapViewInitialCenter] = useState(null);
   const [selectedUpdate, setSelectedUpdate] = useState(null);
   const [updateDetailSource, setUpdateDetailSource] = useState(null); // 'home' or 'list'
 
@@ -59,6 +65,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadProfile();
+    loadSightingsCount();
   }, [user]);
 
   const loadProfile = async () => {
@@ -77,6 +84,23 @@ export default function HomeScreen() {
     }
   };
 
+  const loadSightingsCount = async () => {
+    if (!user?.id) {
+      setSightingsCount(0);
+      return;
+    }
+
+    try {
+      const { count, error } = await getUserSightingsCount(user.id);
+      if (!error) {
+        setSightingsCount(count || 0);
+      }
+    } catch (error) {
+      console.error('Error loading sightings count:', error);
+      setSightingsCount(0);
+    }
+  };
+
   const handleSignOut = async () => {
     const { error } = await signOut();
     if (error) {
@@ -84,11 +108,11 @@ export default function HomeScreen() {
     }
   };
 
-  // Mock data for stats - replace with real data later
+  // Stats data
   const stats = {
-    totalSightings: profile?.total_meows || 0,
-    communityPoints: 32,
-    contributions: 70,
+    totalSightings: sightingsCount,
+    communityPoints: 32, // TODO: Implement community points system
+    contributions: 70, // TODO: Implement contributions count
   };
 
 
@@ -134,7 +158,39 @@ export default function HomeScreen() {
   // If showing map view screen, render it instead
   if (showMapViewScreen) {
     return (
-      <MapViewScreen onBack={() => setShowMapViewScreen(false)} />
+      <MapViewScreen 
+        onBack={() => {
+          setShowMapViewScreen(false);
+          setMapViewInitialCenter(null); // Reset initial center when closing
+          loadSightingsCount(); // Refresh count when returning from map (sightings may have been created)
+        }}
+        initialCenter={mapViewInitialCenter}
+      />
+    );
+  }
+
+  // If showing my sightings screen, render it instead
+  if (showMySightingsScreen) {
+    return (
+      <MySightingsScreen 
+        onBack={() => {
+          setShowMySightingsScreen(false);
+          loadSightingsCount(); // Refresh count when returning (sightings may have been deleted)
+        }}
+        onShowInMap={(sighting) => {
+          setShowMySightingsScreen(false);
+          setShowMapViewScreen(true);
+          // Store the sighting location to center map on it
+          if (sighting) {
+            // We'll pass this to MapViewScreen via a state or prop
+            // For now, we'll use a ref or state to pass the initial center
+            setMapViewInitialCenter({
+              latitude: sighting.latitude,
+              longitude: sighting.longitude,
+            });
+          }
+        }}
+      />
     );
   }
 
@@ -215,7 +271,8 @@ export default function HomeScreen() {
         {/* Stats Banner Container (includes Function Cards inside) */}
         <StatsBanner 
           stats={stats} 
-          onMapViewPress={() => setShowMapViewScreen(true)} 
+          onMapViewPress={() => setShowMapViewScreen(true)}
+          onMySightingsPress={() => setShowMySightingsScreen(true)}
         />
       </ScrollView>
 
@@ -228,6 +285,29 @@ export default function HomeScreen() {
         onNotificationPress={(notification) => {
           if (!notification.read) {
             markAsRead(notification.id);
+          }
+        }}
+        onUndo={async (notificationId, sightingData) => {
+          // Handle undo: restore the sighting
+          try {
+            const { restoreSighting } = await import('../services/sightingService');
+            const { data, error } = await restoreSighting(sightingData);
+            
+            if (error) {
+              Alert.alert('Error', 'Failed to restore sighting. Please try again.');
+              return;
+            }
+
+            // Remove the notification after successful undo
+            await removeNotification(notificationId);
+            
+            Alert.alert('Success', 'Sighting restored successfully!');
+            
+            // Refresh notifications
+            refreshNotifications();
+          } catch (error) {
+            console.error('Error undoing sighting deletion:', error);
+            Alert.alert('Error', 'Failed to restore sighting. Please try again.');
           }
         }}
       />

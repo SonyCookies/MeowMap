@@ -14,7 +14,13 @@ import {
 // 2. Third-party libraries
 import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 
-// 3. Constants and contexts
+// 3. Local utilities and hooks
+// (none)
+
+// 4. Local components
+// (none)
+
+// 5. Constants and contexts
 import { colors, theme } from '../constants/theme';
 
 export default function UpdatesListScreen({ updates, onBack, onUpdatePress }) {

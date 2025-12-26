@@ -877,12 +877,12 @@ export default function AuthScreen() {
         }}
         onSubmit={handleForgotPassword}
         onSignInPress={() => {
-          setShowForgotPasswordModal(false);
+                  setShowForgotPasswordModal(false);
           setEmail(forgotPasswordEmail);
-          setForgotPasswordEmail('');
-          setShowEmailModal(true);
-          setIsSignUp(false);
-        }}
+                  setForgotPasswordEmail('');
+                  setShowEmailModal(true);
+                  setIsSignUp(false);
+                }}
       />
 
       {/* Email Verification Modal */}

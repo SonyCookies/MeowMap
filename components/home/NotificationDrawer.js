@@ -32,7 +32,7 @@ const DRAWER_WIDTH = SCREEN_WIDTH * 0.85; // 85% of screen width
  * Notification Drawer Component
  * Slides in from the right side when notification bell is clicked
  */
-const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsRead, onNotificationPress }) => {
+const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsRead, onNotificationPress, onUndo }) => {
   const slideAnim = useRef(new Animated.Value(DRAWER_WIDTH)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = React.useState(false);
@@ -218,6 +218,7 @@ const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsR
                   key={notification.id || index}
                   notification={notification}
                   onPress={() => handleNotificationPress(notification)}
+                  onUndo={onUndo}
                 />
               ))
             )}
@@ -231,8 +232,41 @@ const NotificationDrawer = ({ visible, onClose, notifications = [], onMarkAllAsR
 /**
  * Individual Notification Item Component
  */
-const NotificationItem = ({ notification, onPress }) => {
+const NotificationItem = ({ notification, onPress, onUndo }) => {
   const isRead = notification.read || false;
+
+  // Check if this is a deletion notification with undo capability
+  const isDeletionNotification = () => {
+    try {
+      if (!notification.message) return false;
+      const parsed = JSON.parse(notification.message);
+      return parsed && parsed.action === 'sighting_deleted' && parsed.sightingData;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Check if undo is still available (within 24 hours)
+  const isUndoAvailable = () => {
+    if (!isDeletionNotification()) return false;
+    
+    const createdAt = notification.created_at || notification.createdAt;
+    if (!createdAt) return false;
+    
+    try {
+      const createdDate = new Date(createdAt);
+      const now = new Date();
+      const hoursDiff = (now - createdDate) / (1000 * 60 * 60);
+      
+      // Undo is only available within 24 hours
+      return hoursDiff < 24;
+    } catch (e) {
+      console.error('Error checking undo availability:', e);
+      return false;
+    }
+  };
+
+  const canUndo = isUndoAvailable();
 
   // Format time - use existing time property or format from created_at
   const getFormattedTime = () => {
@@ -254,6 +288,87 @@ const NotificationItem = ({ notification, onPress }) => {
     return 'now';
   };
 
+  const handleUndo = (e) => {
+    e.stopPropagation();
+    if (onUndo && canUndo) {
+      try {
+        const parsed = JSON.parse(notification.message);
+        onUndo(notification.id, parsed.sightingData);
+      } catch (error) {
+        console.error('Error parsing notification data for undo:', error);
+      }
+    }
+  };
+
+  // Get display message (not the JSON)
+  const getDisplayMessage = () => {
+    // Try to parse JSON message
+    try {
+      if (!notification.message) return '';
+      
+      const parsed = JSON.parse(notification.message);
+      
+      // Handle sighting_deleted
+      if (parsed.action === 'sighting_deleted' && parsed.sightingData) {
+        const catName = parsed.sightingData?.cat_name || 'Untitled';
+        const createdAt = notification.created_at || notification.createdAt;
+        
+        if (createdAt) {
+          try {
+            const createdDate = new Date(createdAt);
+            const now = new Date();
+            const hoursDiff = (now - createdDate) / (1000 * 60 * 60);
+            
+            if (hoursDiff < 24) {
+              const remainingHours = Math.floor(24 - hoursDiff);
+              return `Sighting "${catName}" was deleted. Undo available for ${remainingHours} more hour${remainingHours !== 1 ? 's' : ''}.`;
+            } else {
+              return `Sighting "${catName}" was deleted. Undo is no longer available.`;
+            }
+          } catch (e) {
+            return `Sighting "${catName}" was deleted.`;
+          }
+        }
+        return `Sighting "${catName}" was deleted.`;
+      }
+      
+      // Handle sighting_created
+      if (parsed.action === 'sighting_created' && parsed.sightingData) {
+        const catName = parsed.sightingData?.cat_name || 'Untitled';
+        return `Your sighting "${catName}" has been created successfully!`;
+      }
+      
+      // Handle comment_added
+      if (parsed.action === 'comment_added') {
+        const commenterName = parsed.commenterName || 'Someone';
+        const catName = parsed.catName || 'a sighting';
+        return `${commenterName} left a comment on "${catName}".`;
+      }
+      
+      // Handle status_updated
+      if (parsed.action === 'status_updated') {
+        const updaterName = parsed.updaterName || 'Someone';
+        const catName = parsed.catName || 'a sighting';
+        const statusLabels = {
+          sighting: 'Sighting',
+          fed: 'Fed',
+          taken_to_vet: 'Taken to Vet',
+          adopted: 'Adopted',
+          gone: 'Gone',
+        };
+        const oldStatusLabel = statusLabels[parsed.oldStatus] || parsed.oldStatus;
+        const newStatusLabel = statusLabels[parsed.newStatus] || parsed.newStatus;
+        return `${updaterName} updated the status of "${catName}" from ${oldStatusLabel} to ${newStatusLabel}.`;
+      }
+      
+      // If parsed but no known action, return original message
+      return notification.message;
+    } catch (e) {
+      // Not JSON, return as-is
+      return notification.message || '';
+    }
+  };
+
   return (
     <TouchableOpacity
       style={[styles.notificationItem, !isRead && styles.notificationItemUnread]}
@@ -266,12 +381,12 @@ const NotificationItem = ({ notification, onPress }) => {
           <Text style={styles.notificationTitle}>{notification.title}</Text>
           <Text style={styles.notificationTime}>{getFormattedTime()}</Text>
         </View>
-        {notification.message && (
+        {getDisplayMessage() && (
           <Text
             style={styles.notificationMessage}
             numberOfLines={2}
           >
-            {notification.message}
+            {getDisplayMessage()}
           </Text>
         )}
         {notification.type && (
@@ -279,6 +394,16 @@ const NotificationItem = ({ notification, onPress }) => {
             {getNotificationIcon(notification.type)}
             <Text style={styles.notificationTypeText}>{notification.type}</Text>
           </View>
+        )}
+        {canUndo && (
+          <TouchableOpacity
+            style={styles.undoButton}
+            onPress={handleUndo}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="undo" size={16} color={colors.primary} />
+            <Text style={styles.undoButtonText}>Undo</Text>
+          </TouchableOpacity>
         )}
       </View>
     </TouchableOpacity>
@@ -480,6 +605,24 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '500',
     textTransform: 'capitalize',
+  },
+  undoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    backgroundColor: colors.cream,
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignSelf: 'flex-start',
+  },
+  undoButtonText: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '600',
   },
 });
 

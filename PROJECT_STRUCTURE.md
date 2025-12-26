@@ -253,6 +253,7 @@ All profile-related components are in `components/profile/`:
   - `AuthScreen.js` - Authentication (login/signup) with biometric support
   - `HomeScreen.js` - Main dashboard with stats, updates, and navigation
   - `MapViewScreen.js` - Interactive map with cat sightings, filters, and controls
+  - `MySightingsScreen.js` - List view of user's own cat sightings with filters and search
   - `ProfileScreen.js` - User profile viewing and editing
   - `ProfileSetupScreen.js` - Initial profile setup wizard
   - `UpdateDetailScreen.js` - Individual update/news detail view
@@ -263,7 +264,7 @@ All profile-related components are in `components/profile/`:
 ✅ All screens use functional components with hooks
 ✅ All screens use StyleSheet.create() for styles
 ✅ All screens use default exports
-⚠️ Note: `MapViewScreen.js` (~1216 lines) and `AuthScreen.js` (~1500 lines) exceed the recommended 500-line limit but are functional and well-organized
+⚠️ Note: `MapViewScreen.js` (~1518 lines) and `AuthScreen.js` (~1500 lines) exceed the recommended 500-line limit but are functional and well-organized
 
 ## 🚀 Import Patterns
 

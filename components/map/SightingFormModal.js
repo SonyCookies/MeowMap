@@ -40,6 +40,8 @@ export default function SightingFormModal({
   onRemovePhoto,
   onSubmit,
   onCancel,
+  isEditMode = false,
+  sightingId = null,
 }) {
   return (
     <>
@@ -56,7 +58,9 @@ export default function SightingFormModal({
           <View style={styles.modalBackdrop} />
           <View style={[styles.modalContent, submitting && styles.modalContentDisabled]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Report Cat Sighting</Text>
+              <Text style={styles.modalTitle}>
+                {isEditMode ? 'Edit Cat Sighting' : 'Report Cat Sighting'}
+              </Text>
               <TouchableOpacity onPress={onCancel}>
                 <FontAwesome name="times" size={20} color={colors.textDark} />
               </TouchableOpacity>
